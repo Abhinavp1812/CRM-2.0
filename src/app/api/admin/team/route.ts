@@ -57,8 +57,19 @@ export async function POST(req: Request) {
   }
 
   const emailNorm = email.toLowerCase().trim();
-  const existing = await prisma.user.findUnique({ where: { email: emailNorm } });
-  if (existing) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+
+  // Check active users only — soft-deleted users may hold the same email
+  const existingActive = await prisma.user.findFirst({ where: { email: emailNorm, deletedAt: null } });
+  if (existingActive) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+
+  // If a soft-deleted user holds this email, rename it to free the DB unique slot
+  const existingDeleted = await prisma.user.findFirst({ where: { email: emailNorm, deletedAt: { not: null } } });
+  if (existingDeleted) {
+    await prisma.user.update({
+      where: { id: existingDeleted.id },
+      data: { email: `deleted_${Date.now()}_${emailNorm}` },
+    });
+  }
 
   const passwordHash = await bcrypt.hash(password, 10);
 
@@ -73,5 +84,32 @@ export async function POST(req: Request) {
     select: { id: true, name: true, email: true, role: true, isActive: true },
   });
 
-  return NextResponse.json({ success: true, user });
+  // Auto-assign any customers whose pendingOwnerName matches this agent's name
+  const pending = await prisma.customer.findMany({
+    where: { pendingOwnerName: { equals: name.trim(), mode: "insensitive" }, deletedAt: null },
+    select: { id: true },
+  });
+
+  let pendingAssigned = 0;
+  if (pending.length > 0) {
+    const pendingIds = pending.map((c) => c.id);
+    await prisma.$transaction([
+      prisma.customer.updateMany({
+        where: { id: { in: pendingIds } },
+        data: { ownerId: user.id, pendingOwnerName: null },
+      }),
+      prisma.activityLog.createMany({
+        data: pendingIds.map((customerId) => ({
+          customerId,
+          userId: user.id,
+          activityType: "OWNER_CHANGED" as const,
+          oldValue: "pending",
+          newValue: name,
+        })),
+      }),
+    ]);
+    pendingAssigned = pending.length;
+  }
+
+  return NextResponse.json({ success: true, user, pendingAssigned });
 }

@@ -38,27 +38,25 @@ export default function LogCallButton({ customerId }: { customerId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center px-3 h-9 rounded bg-purple-50 text-purple-800 hover:bg-purple-100 text-sm font-medium"
+        className="inline-flex items-center px-3 h-9 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 text-sm font-medium transition-colors"
       >
         Log a call
       </button>
       {open ? (
         <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-20 px-4"
+          className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center px-4"
           onClick={() => setOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white border rounded-lg p-4 shadow-md w-full max-w-md"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
           >
-            <h3 className="font-semibold mb-3">Log an off-schedule call</h3>
-            <p className="text-xs text-gray-600 mb-3">
-              Use this when the customer contacted you outside their scheduled
-              follow-up. Adds an entry to the timeline without changing their
-              follow-up date.
+            <h3 className="font-semibold text-gray-900 text-lg mb-1">Log an off-schedule call</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Adds a timeline entry without changing their follow-up date.
             </p>
             {error ? (
-              <div className="mb-3 p-2 bg-red-50 text-red-700 rounded text-sm">
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
                 {error}
               </div>
             ) : null}
@@ -67,23 +65,23 @@ export default function LogCallButton({ customerId }: { customerId: string }) {
               onChange={(e) => setNote(e.target.value)}
               rows={3}
               placeholder="What was discussed?"
-              className="w-full border rounded px-2 py-2 text-sm mb-3"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
               disabled={saving}
             />
-            <div className="flex gap-2">
-              <button
-                onClick={save}
-                disabled={saving}
-                className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Log call"}
-              </button>
+            <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setOpen(false)}
                 disabled={saving}
-                className="px-4 py-2 bg-gray-200 text-sm rounded"
+                className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Log call"}
               </button>
             </div>
           </div>

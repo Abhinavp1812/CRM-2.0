@@ -144,6 +144,77 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: true });
   }
 
+  if (action === "reassignWarmCold") {
+    // Warm = customers that have been contacted at least once
+    // Cold = customers that have never been contacted
+    const { warmDestId, warmRoundRobin, coldDestId, coldRoundRobin } = body;
+
+    const owned = await prisma.customer.findMany({
+      where: { ownerId: id, deletedAt: null },
+      select: { id: true, followup: { select: { lastContactedAt: true } } },
+    });
+    const warm = owned.filter((c) => c.followup?.lastContactedAt != null).map((c) => c.id);
+    const cold = owned.filter((c) => c.followup?.lastContactedAt == null).map((c) => c.id);
+
+    async function loadAgents() {
+      const agents = await prisma.user.findMany({
+        where: { role: "AGENT", deletedAt: null, id: { not: id }, onLeaveFrom: null },
+        select: { id: true },
+      });
+      return agents;
+    }
+
+    async function roundRobinAssign(customerIds: string[]) {
+      const agents = await loadAgents();
+      if (agents.length === 0) return false;
+      const agentIds = agents.map((a) => a.id);
+      const counts = await prisma.customer.groupBy({ by: ["ownerId"], where: { ownerId: { in: agentIds }, deletedAt: null }, _count: { _all: true } });
+      const countBy: Record<string, number> = {};
+      for (const r of counts) if (r.ownerId) countBy[r.ownerId] = r._count._all;
+      const agentOrder = agentIds.map((aid) => ({ id: aid, count: countBy[aid] || 0 }));
+      const mapping: Record<string, string[]> = {};
+      for (const cid of customerIds) {
+        agentOrder.sort((a, b) => a.count - b.count);
+        const dest = agentOrder[0];
+        mapping[dest.id] = mapping[dest.id] || [];
+        mapping[dest.id].push(cid);
+        dest.count++;
+      }
+      for (const [destId, chunk] of Object.entries(mapping)) {
+        await prisma.customer.updateMany({ where: { id: { in: chunk } }, data: { ownerId: destId } });
+      }
+      return true;
+    }
+
+    if (warm.length > 0) {
+      if (warmDestId) {
+        const dest = await prisma.user.findUnique({ where: { id: warmDestId } });
+        if (!dest || dest.role !== "AGENT" || dest.deletedAt) {
+          return NextResponse.json({ error: "Invalid warm destination agent" }, { status: 400 });
+        }
+        await prisma.customer.updateMany({ where: { id: { in: warm } }, data: { ownerId: warmDestId } });
+      } else if (warmRoundRobin) {
+        const ok = await roundRobinAssign(warm);
+        if (!ok) return NextResponse.json({ error: "No available agents for warm customers" }, { status: 400 });
+      }
+    }
+
+    if (cold.length > 0) {
+      if (coldDestId) {
+        const dest = await prisma.user.findUnique({ where: { id: coldDestId } });
+        if (!dest || dest.role !== "AGENT" || dest.deletedAt) {
+          return NextResponse.json({ error: "Invalid cold destination agent" }, { status: 400 });
+        }
+        await prisma.customer.updateMany({ where: { id: { in: cold } }, data: { ownerId: coldDestId } });
+      } else if (coldRoundRobin) {
+        const ok = await roundRobinAssign(cold);
+        if (!ok) return NextResponse.json({ error: "No available agents for cold customers" }, { status: 400 });
+      }
+    }
+
+    return NextResponse.json({ success: true, warmMoved: warm.length, coldMoved: cold.length });
+  }
+
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
 

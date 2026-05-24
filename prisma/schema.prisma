@@ -50,6 +50,8 @@ model Customer {
   ownerId        String?
   owner          User?         @relation("CustomerOwner", fields: [ownerId], references: [id])
 
+  pendingOwnerName  String?                        // owner name from CSV when agent didn't exist yet; cleared on assignment
+
   // Do-Not-Contact
   doNotContact      Boolean   @default(false)
   doNotContactReason String?

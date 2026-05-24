@@ -25,16 +25,16 @@ export default function FollowupEditButton(props: Props) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center px-2 h-8 rounded bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-medium"
+        className="inline-flex items-center justify-center px-2.5 h-8 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 text-xs font-medium transition-colors"
       >
         Update
       </button>
       {open ? (
         <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-20 px-4"
+          className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-50 flex items-center justify-center px-4"
           onClick={() => setOpen(false)}
         >
-          <div onClick={(e) => e.stopPropagation()}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg">
             <FollowupEditor {...props} onClose={() => setOpen(false)} />
           </div>
         </div>

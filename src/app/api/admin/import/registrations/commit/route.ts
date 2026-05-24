@@ -93,6 +93,7 @@ export async function POST(req: Request) {
     ownerId: string;
     ownerWarning: string | null;
     autoAssigned: boolean;
+    pendingOwnerName: string | null;
     isExisting: boolean;
     existingId: string | null;
     raw: Record<string, unknown>;
@@ -134,6 +135,7 @@ export async function POST(req: Request) {
     let ownerId: string;
     let ownerWarning: string | null = null;
     let autoAssigned = false;
+    let pendingOwnerName: string | null = null;
     const existing = customerByPhone.get(phone);
 
     if (existing) {
@@ -144,16 +146,18 @@ export async function POST(req: Request) {
       if (matched) {
         ownerId = matched.id;
       } else {
+        // Agent name from CSV not in system yet — park temporarily, store name for later
+        pendingOwnerName = ownerRaw;
         const rrId = nextAgentRoundRobin();
         if (rrId) {
           ownerId = rrId;
           autoAssigned = true;
           autoAssignedCount++;
           autoAssignedByAgent.set(rrId, (autoAssignedByAgent.get(rrId) || 0) + 1);
-          ownerWarning = `Owner "${ownerRaw}" not recognized - auto-assigned via round-robin`;
+          ownerWarning = `Owner "${ownerRaw}" not found - parked temporarily, will auto-assign when agent is created`;
         } else {
           ownerId = adminUser.id;
-          ownerWarning = `Owner "${ownerRaw}" not recognized and no active agents - parked with admin`;
+          ownerWarning = `Owner "${ownerRaw}" not found and no active agents - parked with admin, will auto-assign when agent is created`;
         }
         errors.push({ row: rowNum, reason: ownerWarning, data: row });
       }
@@ -171,7 +175,7 @@ export async function POST(req: Request) {
 
     const parsed: ParsedRow = {
       rowNum, phone, customerIdExt, name, gender, onboardingDate,
-      address, city, sector, ownerId, ownerWarning, autoAssigned,
+      address, city, sector, ownerId, ownerWarning, autoAssigned, pendingOwnerName,
       isExisting: !!existing,
       existingId: existing?.id || null,
       raw: row,
@@ -194,6 +198,7 @@ export async function POST(req: Request) {
         customerIdExt: p.customerIdExt,
         customerType: "NEW_REGISTRATION",
         ownerId: p.ownerId,
+        pendingOwnerName: p.pendingOwnerName,
       })),
       skipDuplicates: true,
     });

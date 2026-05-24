@@ -33,9 +33,10 @@ export default function RegistrationsImportPage() {
   const [committing, setCommitting] = useState(false);
   const [result, setResult] = useState<CommitResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorFilter, setErrorFilter] = useState("");
 
   async function handleFileChange(f: File | null) {
-    setFile(f); setSheetName(null); setSheetOptions([]); setResult(null); setError(null);
+    setFile(f); setSheetName(null); setSheetOptions([]); setResult(null); setError(null); setErrorFilter("");
     if (!f) return;
     setParsing(true);
     try {
@@ -71,35 +72,45 @@ export default function RegistrationsImportPage() {
     }
   }
 
+  const filteredErrors = result?.errors.filter((e) => {
+    if (!errorFilter) return true;
+    const q = errorFilter.toLowerCase();
+    const name = String(e.data?.Name ?? e.data?.name ?? "").toLowerCase();
+    const phone = String(e.data?.Phone ?? e.data?.Mobile ?? e.data?.phone ?? e.data?.mobile ?? "");
+    return e.reason.toLowerCase().includes(q) || name.includes(q) || phone.includes(q);
+  }) ?? [];
+
   return (
     <Layout>
       <div className="mb-6">
-        <Link href="/admin/imports" className="text-sm text-blue-600 hover:underline">← Back to Imports</Link>
-        <h1 className="text-2xl font-bold text-gray-900 mt-2">Import Registrations</h1>
+        <Link href="/admin/imports" className="inline-flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors mb-2">← Imports</Link>
+        <h1 className="text-2xl font-bold text-gray-900 mt-1">Import Registrations</h1>
       </div>
 
       {!result && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">1. Choose CSV or XLSX file</label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
-            className="block w-full text-sm border border-gray-200 rounded-md p-2"
-            disabled={parsing || committing}
-          />
-          {file && <p className="text-xs text-gray-600 mt-1">Selected: {file.name}</p>}
-          {parsing && <p className="text-sm text-blue-600 mt-2">Parsing...</p>}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-4">
+          <div className="mb-5">
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">1. Choose CSV or XLSX file</label>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+              className="block w-full text-sm border border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              disabled={parsing || committing}
+            />
+            {file && <p className="text-xs text-slate-500 mt-1.5">Selected: <span className="font-medium text-slate-700">{file.name}</span></p>}
+            {parsing && <p className="text-sm text-blue-600 mt-2">Parsing…</p>}
+          </div>
 
           {sheetOptions.length > 1 && (
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">2. Choose sheet</label>
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">2. Choose sheet</label>
               <select
                 value={sheetName || ""}
                 onChange={(e) => setSheetName(e.target.value)}
-                className="block w-full text-sm border border-gray-200 rounded-md p-2"
+                className="block w-full text-sm border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">-- Select --</option>
+                <option value="">— Select sheet —</option>
                 {sheetOptions.map((s) => (<option key={s} value={s}>{s}</option>))}
               </select>
             </div>
@@ -109,25 +120,32 @@ export default function RegistrationsImportPage() {
             <button
               onClick={handleCommit}
               disabled={committing}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
             >
-              {committing ? "Importing..." : "Import"}
+              {committing ? "Importing…" : "Import"}
             </button>
           )}
         </div>
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-          <p className="text-sm text-red-800">{error}</p>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 shadow-sm">
+          <p className="text-sm text-red-800 font-medium">{error}</p>
         </div>
       )}
 
       {result && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-green-700 mb-4">Import complete</h2>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+              <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Import complete</h2>
+          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <ResultStat label="New" value={result.newCount} color="green" />
             <ResultStat label="Updated" value={result.updateCount} color="blue" />
             <ResultStat label="Skipped" value={result.skipCount} color="amber" />
@@ -135,37 +153,80 @@ export default function RegistrationsImportPage() {
           </div>
 
           {result.autoAssignedCount && result.autoAssignedCount > 0 && result.agentBreakdown && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <h3 className="font-semibold text-blue-900 mb-2">
                 Auto-assigned via round-robin: {result.autoAssignedCount} new customers
               </h3>
               <div className="space-y-1">
                 {result.agentBreakdown.map((a) => (
                   <div key={a.agentId} className="flex justify-between text-sm">
-                    <span className="text-blue-900">• {a.agentName}</span>
-                    <span className="font-mono text-blue-700">{a.count} customer{a.count !== 1 ? "s" : ""}</span>
+                    <span className="text-blue-800">{a.agentName}</span>
+                    <span className="font-semibold text-blue-700">{a.count}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => { setResult(null); setFile(null); setSheetName(null); setSheetOptions([]); }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              Import another file
-            </button>
-            {result.errors.length > 0 && (
-              <button
-                onClick={() => downloadErrorReport(result.errors, `errors-${file?.name ?? "import"}.xlsx`)}
-                className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-md hover:bg-red-100"
-              >
-                Download Error Report ({result.errorCount} rows)
-              </button>
-            )}
-          </div>
+          {result.errors.length > 0 && (
+            <div className="mb-5 border border-red-200 rounded-xl overflow-hidden">
+              <div className="bg-red-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap border-b border-red-200">
+                <h3 className="text-sm font-semibold text-red-900">
+                  {result.errorCount} error{result.errorCount !== 1 ? "s" : ""}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Filter by name, phone, or reason…"
+                    value={errorFilter}
+                    onChange={(e) => setErrorFilter(e.target.value)}
+                    className="text-sm border border-red-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-400 w-52 bg-white"
+                  />
+                  <button
+                    onClick={() => downloadErrorReport(result.errors, `errors-${file?.name ?? "import"}.xlsx`)}
+                    className="text-xs px-3 py-1.5 bg-white border border-red-200 text-red-700 rounded-lg hover:bg-red-50 whitespace-nowrap font-medium"
+                  >
+                    Download XLSX
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-auto max-h-72">
+                <table className="w-full text-sm">
+                  <thead className="bg-red-50 sticky top-0 border-b border-red-200">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">Row</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">Reason</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">Name</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">Phone</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-100">
+                    {filteredErrors.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-4 text-center text-sm text-slate-400">No errors match the filter.</td>
+                      </tr>
+                    ) : filteredErrors.map((e) => (
+                      <tr key={e.row} className="hover:bg-red-50 transition-colors">
+                        <td className="px-3 py-2 font-mono text-xs text-slate-500">{e.row}</td>
+                        <td className="px-3 py-2 text-red-800 text-xs">{e.reason}</td>
+                        <td className="px-3 py-2 text-slate-700 text-xs">{String(e.data?.Name ?? e.data?.name ?? "-")}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-600">
+                          {String(e.data?.Phone ?? e.data?.Mobile ?? e.data?.phone ?? e.data?.mobile ?? "-")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => { setResult(null); setFile(null); setSheetName(null); setSheetOptions([]); setErrorFilter(""); }}
+            className="inline-flex items-center px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            Import another file
+          </button>
         </div>
       )}
     </Layout>
@@ -174,14 +235,14 @@ export default function RegistrationsImportPage() {
 
 function ResultStat({ label, value, color }: { label: string; value: number; color: "red" | "amber" | "blue" | "green" }) {
   const colors = {
-    red: "bg-red-50 text-red-700",
-    amber: "bg-amber-50 text-amber-700",
-    blue: "bg-blue-50 text-blue-700",
-    green: "bg-green-50 text-green-700",
+    red: "bg-red-50 border-red-100 text-red-700",
+    amber: "bg-amber-50 border-amber-100 text-amber-700",
+    blue: "bg-blue-50 border-blue-100 text-blue-700",
+    green: "bg-emerald-50 border-emerald-100 text-emerald-700",
   };
   return (
-    <div className={"rounded-lg p-3 " + colors[color]}>
-      <p className="text-xs uppercase tracking-wide font-medium">{label}</p>
+    <div className={"rounded-xl p-3 border shadow-sm " + colors[color]}>
+      <p className="text-xs uppercase tracking-wide font-semibold opacity-80">{label}</p>
       <p className="text-2xl font-bold mt-1">{value.toLocaleString()}</p>
     </div>
   );

@@ -39,7 +39,30 @@ export async function POST(request: Request) {
     const agentByName = new Map(agents.map((a) => [a.name.trim().toLowerCase(), a.id]));
     const customerByPhone = new Map(allCustomers.map((c) => [c.phone, c]));
 
-    // Parse all rows in memory
+    // Find the most recent date from date-stamped remark columns (e.g. "Remarks 23-05-2026")
+    const remarkDatePattern = /^remarks\s+(\d{2}-\d{2}-\d{4})$/i;
+    function findLastContactDate(row: Record<string, unknown>): { date: Date; remark: string | null; note: string | null } | null {
+      let best: { date: Date; remark: string | null; note: string | null } | null = null;
+      for (const [key, value] of Object.entries(row)) {
+        const match = key.trim().match(remarkDatePattern);
+        if (!match) continue;
+        const parsed = parseFlexibleDate(match[1]);
+        if (!parsed) continue;
+        const remarkVal = cleanString(value) || null;
+        // Count a column only if it has a non-empty remark value
+        if (!remarkVal) continue;
+        if (!best || parsed.getTime() > best.date.getTime()) {
+          // Find corresponding Detailed Remarks column for the same date
+          const detailKey = Object.keys(row).find(
+            (k) => /^detailed\s+remarks\s+/i.test(k) && k.trim().toLowerCase().endsWith(match[1].toLowerCase())
+          );
+          const noteVal = detailKey ? (cleanString(row[detailKey]) || null) : null;
+          best = { date: parsed, remark: remarkVal, note: noteVal };
+        }
+      }
+      return best;
+    }
+
     type ParsedRow = {
       customerId: string;
       currentOwnerId: string | null;
@@ -47,6 +70,7 @@ export async function POST(request: Request) {
       followupDate: Date;
       remark: string | null;
       note: string | null;
+      lastContactDate: Date | null;
     };
 
     const parsed: ParsedRow[] = [];
@@ -73,8 +97,13 @@ export async function POST(request: Request) {
 
       const ownerName = cleanString(getField(row, "Owner", "owner", "Agent", "agent"));
       const nextFollowupRaw = getField(row, "Next Follow Up date", "Next Followup Date", "Next Follow Up Date", "followup date", "Next_Follow_Up_date");
-      const remark = cleanString(getField(row, "Remarks", "remark", "Last Remark"));
-      const note = cleanString(getField(row, "Detailed Remarks", "detailed remarks", "Note", "notes", "detailed_remarks"));
+
+      // Use date-stamped remark columns to find the most recent contact
+      const lastContact = findLastContactDate(row);
+
+      // Fall back to the plain Remarks/Note columns if no dated ones found
+      const remark = lastContact?.remark ?? cleanString(getField(row, "Remarks", "remark", "Last Remark")) ?? null;
+      const note = lastContact?.note ?? cleanString(getField(row, "Detailed Remarks", "detailed remarks", "Note", "notes", "detailed_remarks")) ?? null;
 
       parsed.push({
         customerId: customer.id,
@@ -83,6 +112,7 @@ export async function POST(request: Request) {
         followupDate: parseFlexibleDate(nextFollowupRaw) ?? new Date(),
         remark: remark || null,
         note: note || null,
+        lastContactDate: lastContact?.date ?? null,
       });
     }
 
@@ -98,18 +128,18 @@ export async function POST(request: Request) {
     const toUpdate = parsed.filter((p) => followupByCustomer.has(p.customerId));
     const ownerChanges = parsed.filter((p) => p.newOwnerId && p.newOwnerId !== p.currentOwnerId);
 
-    const now = new Date().toISOString();
-
     // Single bulk SQL UPDATE for all followup updates
     if (toUpdate.length > 0) {
       const updateData = toUpdate.map((p) => {
         const ex = followupByCustomer.get(p.customerId)!;
+        // Use the most recent date from dated remark columns; fall back to existing DB value
+        const lcDate = p.lastContactDate ?? ex.lastContactedAt ?? null;
         return {
           cid: p.customerId,
           fd: p.followupDate.toISOString(),
           r: p.remark || ex.currentRemark || null,
           n: p.note || ex.currentNote || null,
-          lc: p.remark ? now : (ex.lastContactedAt?.toISOString() ?? null),
+          lc: lcDate ? lcDate.toISOString() : null,
         };
       });
       await prisma.$executeRaw`
@@ -133,7 +163,7 @@ export async function POST(request: Request) {
           nextFollowupDate: p.followupDate,
           currentRemark: p.remark,
           currentNote: p.note,
-          lastContactedAt: p.remark ? new Date() : null,
+          lastContactedAt: p.lastContactDate ?? null,
         })),
         skipDuplicates: true,
       });

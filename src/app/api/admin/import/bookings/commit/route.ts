@@ -254,49 +254,53 @@ export async function POST(req: Request) {
       newCustomers.set(p.phone, p);
     }
   }
+
+  // Pre-compute owner resolution so pendingOwnerName can be stored per customer
+  const ownerResolution = new Map<string, { ownerId: string; pendingOwnerName: string | null }>();
+  for (const p of newCustomers.values()) {
+    let ownerId: string;
+    let pendingOwnerName: string | null = null;
+    if (p.ownerRaw) {
+      const matched = userByName.get(p.ownerRaw.toLowerCase().trim());
+      if (matched) {
+        ownerId = matched.id;
+      } else {
+        // Agent name from CSV not in system yet — park temporarily, store name for later
+        pendingOwnerName = p.ownerRaw;
+        const rrId = nextAgentRoundRobin();
+        if (rrId) {
+          ownerId = rrId;
+          autoAssignedCount++;
+          autoAssignedByAgent.set(rrId, (autoAssignedByAgent.get(rrId) || 0) + 1);
+          errors.push({ row: p.rowNum, reason: `Owner "${p.ownerRaw}" not found - parked temporarily, will auto-assign when agent is created`, data: p.raw });
+        } else {
+          ownerId = adminUser.id;
+          errors.push({ row: p.rowNum, reason: `Owner "${p.ownerRaw}" not found and no active agents - parked with admin, will auto-assign when agent is created`, data: p.raw });
+        }
+      }
+    } else {
+      const rrId = nextAgentRoundRobin();
+      if (rrId) {
+        ownerId = rrId;
+        autoAssignedCount++;
+        autoAssignedByAgent.set(rrId, (autoAssignedByAgent.get(rrId) || 0) + 1);
+      } else {
+        ownerId = adminUser.id;
+      }
+    }
+    ownerResolution.set(p.phone, { ownerId, pendingOwnerName });
+  }
+
   if (newCustomers.size > 0) {
     await prisma.customer.createMany({
       data: Array.from(newCustomers.values()).map((p) => {
-        let ownerId: string;
-        if (p.ownerRaw) {
-          const matched = userByName.get(p.ownerRaw.toLowerCase().trim());
-          if (matched) {
-            ownerId = matched.id;
-          } else {
-            const rrId = nextAgentRoundRobin();
-            if (rrId) {
-              ownerId = rrId;
-              autoAssignedCount++;
-              autoAssignedByAgent.set(rrId, (autoAssignedByAgent.get(rrId) || 0) + 1);
-              errors.push({
-                row: p.rowNum,
-                reason: `Owner "${p.ownerRaw}" not recognized - auto-assigned via round-robin`,
-                data: p.raw,
-              });
-            } else {
-              ownerId = adminUser.id;
-              errors.push({
-                row: p.rowNum,
-                reason: `Owner "${p.ownerRaw}" not recognized and no active agents - parked with admin`,
-                data: p.raw,
-              });
-            }
-          }
-        } else {
-          const rrId = nextAgentRoundRobin();
-          if (rrId) {
-            ownerId = rrId;
-            autoAssignedCount++;
-            autoAssignedByAgent.set(rrId, (autoAssignedByAgent.get(rrId) || 0) + 1);
-          } else {
-            ownerId = adminUser.id;
-          }
-        }
+        const { ownerId, pendingOwnerName } = ownerResolution.get(p.phone)!;
         return {
           phone: p.phone,
           name: p.customerName,
           city: p.salonCity,
           customerType: "CUSTOMER" as const,
+          pendingOwnerName,
           ownerId,
         };
       }),

@@ -132,37 +132,36 @@ export default function FollowupEditor({
   }
 
   return (
-    <div className="bg-white border rounded-lg p-4 shadow-md max-w-2xl">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="font-semibold">
-          Update follow-up for{" "}
-          <span className="text-blue-700">{customerName || "this customer"}</span>
-        </h3>
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h3 className="font-semibold text-gray-900 text-lg">Update follow-up</h3>
+          <p className="text-sm text-slate-500 mt-0.5">{customerName || "This customer"}</p>
+        </div>
         {onClose ? (
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-500 hover:text-gray-800"
-          >
-            Close
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 transition-colors p-1 -m-1">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         ) : null}
       </div>
 
       {error ? (
-        <div className="mb-3 p-2 bg-red-50 text-red-700 rounded text-sm">
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
           {error}
         </div>
       ) : null}
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Remark <span className="text-red-600">*</span>
+          <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+            Remark <span className="text-red-500">*</span>
           </label>
           <select
             value={remark}
             onChange={(e) => handleRemarkChange(e.target.value)}
-            className="w-full border rounded px-2 py-2 text-sm"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={saving}
           >
             <option value="">— Choose a remark —</option>
@@ -177,70 +176,62 @@ export default function FollowupEditor({
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Detailed note (optional)
+          <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+            Note <span className="font-normal text-slate-400">(optional)</span>
           </label>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
-            placeholder="Anything specific worth remembering for next time"
-            className="w-full border rounded px-2 py-2 text-sm"
+            placeholder="Anything worth remembering for next time…"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             disabled={saving}
           />
         </div>
 
         {!effectiveDnc && !isCloser ? (
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Next follow-up date <span className="text-red-600">*</span>
-              {selectedOption?.defaultDaysAhead !== null &&
-              selectedOption?.defaultDaysAhead !== undefined ? (
-                <span className="text-gray-500 font-normal">
-                  {" "}
-                  (default: +{selectedOption.defaultDaysAhead} days)
-                </span>
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+              Next follow-up date <span className="text-red-500">*</span>
+              {selectedOption?.defaultDaysAhead !== null && selectedOption?.defaultDaysAhead !== undefined ? (
+                <span className="font-normal text-slate-400 normal-case tracking-normal"> (+{selectedOption.defaultDaysAhead}d default)</span>
               ) : null}
             </label>
             <input
               type="date"
               value={nextDate}
               onChange={(e) => setNextDate(e.target.value)}
-              className="w-full border rounded px-2 py-2 text-sm"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={saving}
             />
           </div>
         ) : null}
 
         {isAutoDnc ? (
-          <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
-            This remark will automatically flag the customer as <strong>Do Not
-            Contact</strong>. They will be removed from all future queues.
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+            This remark automatically flags the customer as <strong>Do Not Contact</strong>.
           </div>
         ) : null}
 
         {isCloser && !isAutoDnc ? (
-          <div className="p-3 bg-gray-50 border border-gray-200 rounded text-sm text-gray-700">
-            This remark closes the follow-up cycle. The customer won&apos;t be in
-            anyone&apos;s queue unless a new booking comes in or you re-open them.
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+            This remark closes the follow-up. The customer won&apos;t appear in queues unless re-opened.
           </div>
         ) : null}
 
         {!isAutoDnc && !isCloser ? (
-          <div className="border-t pt-3">
-            <label className="flex items-start gap-2 text-sm">
+          <div className="border-t border-gray-100 pt-4">
+            <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={flagDnc}
                 onChange={(e) => setFlagDnc(e.target.checked)}
-                className="mt-1"
+                className="mt-0.5"
                 disabled={saving}
               />
               <span>
-                <strong>Mark as Do Not Contact</strong>
-                <span className="block text-xs text-gray-600">
-                  e.g. wrong number, asked not to be contacted
-                </span>
+                <span className="text-sm font-semibold text-gray-800">Mark as Do Not Contact</span>
+                <span className="block text-xs text-slate-500 mt-0.5">Wrong number, asked not to be called, etc.</span>
               </span>
             </label>
             {flagDnc ? (
@@ -249,30 +240,30 @@ export default function FollowupEditor({
                 value={dncReason}
                 onChange={(e) => setDncReason(e.target.value)}
                 placeholder="Reason (optional)"
-                className="mt-2 w-full border rounded px-2 py-2 text-sm"
+                className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={saving}
               />
             ) : null}
           </div>
         ) : null}
 
-        <div className="flex gap-2 pt-2 border-t">
-          <button
-            onClick={handleSave}
-            disabled={saving || !remark}
-            className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
+        <div className="flex gap-2 pt-2 border-t border-gray-100 justify-end">
           {onClose ? (
             <button
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 bg-gray-200 text-sm rounded"
+              className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               Cancel
             </button>
           ) : null}
+          <button
+            onClick={handleSave}
+            disabled={saving || !remark}
+            className="px-5 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
     </div>
