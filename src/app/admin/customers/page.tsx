@@ -11,7 +11,7 @@ import {
   type AdminCustomerFilter,
 } from "@/lib/followups";
 import { CustomerTypeBadge } from "@/components/StatusBadge";
-import TopNav from "@/components/TopNav";
+import Layout from "@/components/Layout";
 
 export const dynamic = "force-dynamic";
 
@@ -68,8 +68,7 @@ export default async function AdminCustomersPage({
   }
 
   return (
-    <>
-      <TopNav />
+    <Layout>
       <main className="min-h-screen bg-gray-50 py-6">
         <div className="max-w-7xl mx-auto px-4">
           <Link href="/admin" className="text-sm text-gray-600 hover:text-gray-900">
@@ -271,6 +270,6 @@ export default async function AdminCustomersPage({
           )}
         </div>
       </main>
-    </>
+    </Layout>
   );
 }

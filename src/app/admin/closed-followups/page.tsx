@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getClosedCustomers, getClosureReasons, formatPhone } from "@/lib/followups";
 import { CustomerTypeBadge } from "@/components/StatusBadge";
-import TopNav from "@/components/TopNav";
+import Layout from "@/components/Layout";
 import ReopenFollowupButton from "@/components/ReopenFollowupButton";
 
 export const dynamic = "force-dynamic";
@@ -42,8 +42,7 @@ export default async function ClosedFollowupsPage({
   }
 
   return (
-    <>
-      <TopNav />
+    <Layout>
       <main className="min-h-screen bg-slate-50 py-4 md:py-8">
         <div className="max-w-7xl mx-auto px-4">
           <Link href="/admin" className="inline-flex items-center text-sm text-slate-500 hover:text-slate-800 transition-colors mb-4">
@@ -174,7 +173,7 @@ export default async function ClosedFollowupsPage({
           )}
         </div>
       </main>
-    </>
+    </Layout>
   );
 }
 
