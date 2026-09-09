@@ -36,11 +36,11 @@ export default async function MyStatsPage() {
         currentRemark: { not: null },
       },
     }),
-    prisma.activityLog.count({ where: { userId, activityType: "CALL_LOGGED", createdAt: { gte: weekAgo } } }),
+    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
     prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: weekAgo } } }),
-    prisma.activityLog.count({ where: { userId, activityType: "CALL_LOGGED", createdAt: { gte: monthAgo } } }),
+    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: monthAgo } } }),
     prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: monthAgo } } }),
-    prisma.activityLog.count({ where: { userId, activityType: "CALL_LOGGED", createdAt: { gte: today, lt: tomorrow } } }),
+    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: today, lt: tomorrow } } }),
     prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: today, lt: tomorrow } } }),
   ]);
 

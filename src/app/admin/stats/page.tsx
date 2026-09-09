@@ -34,7 +34,7 @@ export default async function AdminStatsPage() {
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { isNot: null } } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: true } }),
-        prisma.activityLog.count({ where: { userId: a.id, activityType: "CALL_LOGGED", createdAt: { gte: weekAgo } } }),
+        prisma.activityLog.count({ where: { userId: a.id, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
         prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", createdAt: { gte: weekAgo } } }),
         prisma.followup.count({
           where: {

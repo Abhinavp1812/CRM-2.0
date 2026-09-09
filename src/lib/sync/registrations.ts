@@ -204,6 +204,52 @@ export async function importRegistrationRows(
     `;
   }
 
+  // A customer who already existed by phone (imported before this sync ever ran,
+  // or picked up first by a booking) never went through the toCreate branch above,
+  // so they never got a Registration row - meaning their onboarding date and raw
+  // sheet snapshot were silently dropped every time this sync saw them, no matter
+  // how many times it ran. Back-fill one registration for anyone in toUpdate who
+  // doesn't already have one, so this data isn't lost for existing customers.
+  if (toUpdate.length > 0) {
+    const toUpdateIds = toUpdate.map((p) => customerByPhone.get(p.phone)!.id);
+    const alreadyRegistered = new Set(
+      (await findManyChunked(
+        toUpdateIds,
+        (chunk) => prisma.registration.findMany({ where: { customerId: { in: chunk } }, select: { customerId: true } })
+      )).map((r) => r.customerId)
+    );
+
+    const backfill = toUpdate
+      .map((p) => ({ id: customerByPhone.get(p.phone)!.id, p }))
+      .filter(({ id }) => !alreadyRegistered.has(id));
+
+    if (backfill.length > 0) {
+      await Promise.all([
+        createManyChunked(backfill, (chunk) =>
+          prisma.registration.createMany({
+            data: chunk.map(({ id, p }) => ({
+              customerId: id,
+              customerIdExt: p.customerIdExt,
+              onboardingDate: p.onboardingDate,
+              rawData: p.raw as never,
+            })),
+            skipDuplicates: true,
+          })
+        ),
+        createManyChunked(backfill, (chunk) =>
+          prisma.activityLog.createMany({
+            data: chunk.map(({ id }) => ({
+              customerId: id,
+              userId: ctx.userId,
+              activityType: "REGISTRATION_IMPORTED" as const,
+              note: "Registration record backfilled from Google Sheet (customer already existed)",
+            })),
+          })
+        ),
+      ]);
+    }
+  }
+
   const healedFollowups = await healMissingFollowups(ctx.userId, followupDays);
 
   return {

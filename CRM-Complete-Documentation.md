@@ -573,8 +573,8 @@ Personal performance dashboard for agents.
 - Active customers (have followup, not DNC)
 - DNC customers
 - Due today
-- Calls logged today / this week / this month
-- Remarks added today / this week / this month
+- **Calls** today / this week / this month — counts both a formal remark save (`REMARK_ADDED`, which always stamps `lastContactedAt` too — this is the normal day-to-day "call the customer, then Update" workflow) and an off-schedule `CALL_LOGGED` entry from the "Log a call" button on a customer's profile page. Counting `CALL_LOGGED` alone showed 0 for nearly every agent, since that button is a niche supplement, not how contact normally gets recorded.
+- **Remarks** added today / this week / this month — `REMARK_ADDED` only, so it is always ≤ Calls; the gap between the two is off-schedule calls that were logged without (yet) saving a remark.
 
 ---
 
@@ -652,8 +652,8 @@ Full agent management interface.
 Performance overview for the entire team.
 
 **Shows per agent:**
-- Calls today / this week / this month
-- Remarks today / this week / this month
+- **Calls** today / this week / this month (`REMARK_ADDED` + `CALL_LOGGED` combined — see `/stats` above)
+- **Remarks** today / this week / this month (`REMARK_ADDED` only)
 - Customers owned
 - Due today count
 
@@ -713,6 +713,7 @@ Both syncs are **idempotent**: running them again on the same sheet does nothing
    - `createMany` for followup records (all set to today's date initially)
    - `createMany` for activity logs and registration records
    - Batched updates for existing customers (only fills in blank fields)
+   - **Registration back-fill:** an existing customer never goes through the new-customer branch above, so on its own it would never get a `Registration` row — meaning fields only stored there (Onboarding Date, the raw sheet snapshot) would be silently dropped every time the sync saw them, no matter how many times it ran. After the update step, anyone in the existing-customer batch who doesn't already have a `Registration` row gets one created from this run's data, logged as `REGISTRATION_IMPORTED`.
 5. **Returns:** new count, already-known count, skipped count, error count, agent breakdown
 
 ### Bookings sync
