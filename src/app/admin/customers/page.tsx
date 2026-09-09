@@ -10,8 +10,8 @@ import {
   telLink,
   type AdminCustomerFilter,
 } from "@/lib/followups";
-import { CustomerTypeBadge } from "@/components/StatusBadge";
 import Layout from "@/components/Layout";
+import AdminCustomersTable, { type AdminCustomerClientRow } from "@/components/AdminCustomersTable";
 
 export const dynamic = "force-dynamic";
 
@@ -149,124 +149,31 @@ export default async function AdminCustomersPage({
               No customers match these filters.
             </div>
           ) : (
-            <>
-              <div className="bg-white rounded-lg shadow overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr className="text-left text-xs font-medium text-gray-700 uppercase">
-                      <th className="px-3 py-3">Customer</th>
-                      <th className="px-3 py-3">Type</th>
-                      <th className="px-3 py-3">Phone</th>
-                      <th className="px-3 py-3">City</th>
-                      <th className="px-3 py-3">Owner</th>
-                      <th className="px-3 py-3">Current State</th>
-                      <th className="px-3 py-3">Followup Date</th>
-                      <th className="px-3 py-3">Activities</th>
-                      <th className="px-3 py-3">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {rows.map((c) => {
-                      const followupText = c.followupDate
-                        ? new Date(c.followupDate).toLocaleDateString("en-IN")
-                        : "-";
-                      const lastContactText = c.lastContactedAt
-                        ? new Date(c.lastContactedAt).toLocaleDateString("en-IN")
-                        : "Never";
-                      const lastActivityText = c.lastActivityDate
-                        ? new Date(c.lastActivityDate).toLocaleDateString("en-IN")
-                        : "-";
-                      const waMessage = "Hi " + (c.name ?? "") + ", this is from Style Lounge.";
-
-                      return (
-                        <tr key={c.id} className="hover:bg-gray-50">
-                          <td className="px-3 py-3">
-                            <Link
-                              href={"/customers/" + c.id}
-                              className="font-medium text-gray-900 hover:text-blue-700"
-                            >
-                              {c.name ?? "(no name)"}
-                            </Link>
-                          </td>
-                          <td className="px-3 py-3">
-                            <CustomerTypeBadge
-                              type={c.customerType}
-                              doNotContact={c.doNotContact}
-                            />
-                          </td>
-                          <td className="px-3 py-3 font-mono text-gray-700 whitespace-nowrap">
-                            {formatPhone(c.phone)}
-                          </td>
-                          <td className="px-3 py-3 text-gray-600">{c.city ?? "-"}</td>
-                          <td className="px-3 py-3 text-gray-600">{c.ownerName ?? "-"}</td>
-                          <td className="px-3 py-3 text-gray-700 max-w-xs">
-                            {c.currentRemark ? (
-                              <div>
-                                <div className="font-medium">{c.currentRemark}</div>
-                                {c.currentNote ? (
-                                  <div className="text-xs text-gray-500 truncate">{c.currentNote}</div>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-xs italic">No remark</span>
-                            )}
-                            <div className="text-xs text-gray-500 mt-0.5">Last: {lastContactText}</div>
-                          </td>
-                          <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{followupText}</td>
-                          <td className="px-3 py-3 text-gray-600 text-center">
-                            <div>{c.totalActivities}</div>
-                            <div className="text-xs text-gray-500">{lastActivityText}</div>
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="flex gap-1 flex-wrap">
-                              {!c.doNotContact ? (
-                                <>
-                                  <a href={telLink(c.phone)} className="inline-flex items-center px-2 h-7 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs">Call</a>
-                                  <a href={whatsappLink(c.phone, waMessage)} target="_blank" rel="noopener" className="inline-flex items-center px-2 h-7 rounded bg-green-50 text-green-700 hover:bg-green-100 text-xs">WA</a>
-                                </>
-                              ) : null}
-                              <Link href={"/customers/" + c.id} className="inline-flex items-center px-2 h-7 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs">Open</Link>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {totalPages > 1 ? (
-                <div className="flex items-center justify-between mt-4 px-1">
-                  <p className="text-sm text-gray-600">Page {page} of {totalPages}</p>
-                  <div className="flex gap-2">
-                    <Link
-                      href={buildUrl({ page: String(Math.max(1, page - 1)) })}
-                      aria-disabled={page === 1}
-                      className={
-                        "px-3 h-9 inline-flex items-center rounded text-sm " +
-                        (page === 1
-                          ? "bg-gray-100 text-gray-400 pointer-events-none"
-                          : "bg-white border hover:bg-gray-50 text-gray-700")
-                      }
-                    >
-                      Previous
-                    </Link>
-                    <Link
-                      href={buildUrl({ page: String(Math.min(totalPages, page + 1)) })}
-                      aria-disabled={page === totalPages}
-                      className={
-                        "px-3 h-9 inline-flex items-center rounded text-sm " +
-                        (page === totalPages
-                          ? "bg-gray-100 text-gray-400 pointer-events-none"
-                          : "bg-white border hover:bg-gray-50 text-gray-700")
-                      }
-                    >
-                      Next
-                    </Link>
-                  </div>
-                </div>
-              ) : null}
-            </>
+            <AdminCustomersTable
+              rows={rows.map((c): AdminCustomerClientRow => ({
+                id: c.id,
+                name: c.name,
+                phone: c.phone,
+                phoneFormatted: formatPhone(c.phone),
+                city: c.city,
+                customerType: c.customerType,
+                doNotContact: c.doNotContact,
+                ownerName: c.ownerName,
+                currentRemark: c.currentRemark,
+                currentNote: c.currentNote,
+                followupText: c.followupDate ? new Date(c.followupDate).toLocaleDateString("en-IN") : "-",
+                lastContactText: c.lastContactedAt ? new Date(c.lastContactedAt).toLocaleDateString("en-IN") : "Never",
+                totalActivities: c.totalActivities,
+                lastActivityText: c.lastActivityDate ? new Date(c.lastActivityDate).toLocaleDateString("en-IN") : "-",
+                hasFollowup: c.hasFollowup,
+                telHref: telLink(c.phone),
+                waHref: whatsappLink(c.phone, "Hi " + (c.name ?? "") + ", this is from Style Lounge."),
+              }))}
+              page={page}
+              totalPages={totalPages}
+              prevHref={buildUrl({ page: String(Math.max(1, page - 1)) })}
+              nextHref={buildUrl({ page: String(Math.min(totalPages, page + 1)) })}
+            />
           )}
         </div>
       </main>

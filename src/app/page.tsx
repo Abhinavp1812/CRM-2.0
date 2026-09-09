@@ -257,7 +257,10 @@ function FollowupRow({
           {f.customerName ?? "(no name)"}
         </Link>
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-          {f.untouched && !f.isBooked && !f.isCancelledRecovery && (
+          {f.isNew && !f.isBooked && !f.isCancelledRecovery && (
+            <span className="inline-block px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">New</span>
+          )}
+          {f.untouched && !f.isNew && !f.isBooked && !f.isCancelledRecovery && (
             <span className="inline-block px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full font-medium">Cold</span>
           )}
           {f.isCancelledRecovery && (
@@ -323,7 +326,10 @@ function FollowupCard({
       <div className="flex items-center gap-2 px-4 pt-3 pb-2 flex-wrap">
         <FollowupStatusBadge status={f.status} />
         <CustomerTypeBadge type={f.customerType} doNotContact={f.doNotContact} />
-        {f.untouched && !f.isBooked && !f.isCancelledRecovery && (
+        {f.isNew && !f.isBooked && !f.isCancelledRecovery && (
+          <span className="inline-block px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">New</span>
+        )}
+        {f.untouched && !f.isNew && !f.isBooked && !f.isCancelledRecovery && (
           <span className="inline-block px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full font-medium">Cold</span>
         )}
         {f.isCancelledRecovery && (

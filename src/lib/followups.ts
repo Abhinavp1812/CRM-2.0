@@ -2,6 +2,12 @@
 
 const STALE_THRESHOLD_DAYS = 60;
 const NEW_BOOKING_DAYS = 20;
+// A followup counts as "New" (badge + pinned to the top of page 1) while it has
+// never been contacted and its date was set within this many days - covers a
+// freshly synced lead or one just bulk-scheduled by an admin. It stops being
+// "new" the moment an agent logs a call or saves a remark, regardless of age.
+const NEW_LEAD_DAYS = 3;
+const NEW_LEAD_CAP = 20;
 
 export type BookingFlavor =
   | "AWAITING_SERVICE"
@@ -27,6 +33,7 @@ export interface FollowupRow {
   ownerName: string | null;
   status: "OVERDUE" | "DUE_TODAY" | "UPCOMING";
   untouched: boolean;
+  isNew: boolean;
   isStale: boolean;
   isBooked: boolean;
   isCancelledRecovery: boolean;
@@ -354,34 +361,57 @@ export async function getTodayFollowups(
     getCancelledRecoveryIds(scope, newBookingCutoff),
   ]);
 
-  const followups = await prisma.followup.findMany({
-    where,
-    include: {
-      customer: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          city: true,
-          customerType: true,
-          doNotContact: true,
-          owner: { select: { name: true } },
-          bookings: {
-            orderBy: { bookingDate: "desc" },
-            take: 1,
-            select: {
-              bookingDate: true,
-              salonNameSnapshot: true,
-              salon: { select: { name: true } },
-            },
+  const followupInclude = {
+    customer: {
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        city: true,
+        customerType: true,
+        doNotContact: true,
+        owner: { select: { name: true } },
+        bookings: {
+          orderBy: { bookingDate: "desc" as const },
+          take: 1,
+          select: {
+            bookingDate: true,
+            salonNameSnapshot: true,
+            salon: { select: { name: true } },
           },
         },
       },
     },
+  };
+
+  const normalFollowupsPromise = prisma.followup.findMany({
+    where,
+    include: followupInclude,
     orderBy: { nextFollowupDate: "asc" },
     skip: (page - 1) * pageSize,
     take: pageSize,
   });
+
+  // Page 1 only: pin a small batch of untouched, freshly-dated leads to the
+  // top - a synced or bulk-scheduled lead a customer hasn't seen yet. This
+  // never changes the underlying skip/take math for the normal query above,
+  // so later pages are unaffected and nothing is skipped or duplicated there.
+  let newFollowups: Awaited<typeof normalFollowupsPromise> = [];
+  if (page === 1) {
+    const newCutoff = new Date(today);
+    newCutoff.setDate(newCutoff.getDate() - NEW_LEAD_DAYS);
+    newFollowups = await prisma.followup.findMany({
+      where: { AND: [where, { lastContactedAt: null, updatedAt: { gte: newCutoff } }] },
+      include: followupInclude,
+      orderBy: { updatedAt: "desc" },
+      take: NEW_LEAD_CAP,
+    });
+  }
+
+  const normalFollowups = await normalFollowupsPromise;
+  const newIds = new Set(newFollowups.map((f) => f.customer.id));
+  const followups =
+    page === 1 ? [...newFollowups, ...normalFollowups.filter((f) => !newIds.has(f.customer.id))] : normalFollowups;
 
   const customerIds = followups.map((f) => f.customer.id);
   const latestPaidByCustomer = await getLatestPaidBookingByCustomer(customerIds);
@@ -390,6 +420,7 @@ export async function getTodayFollowups(
     const fd = startOfDay(f.nextFollowupDate);
     const lastBooking = f.customer.bookings[0];
     const untouched = !f.currentRemark && !f.lastContactedAt;
+    const isNew = newIds.has(f.customer.id);
     const isStale = !!f.lastContactedAt && f.lastContactedAt < staleCutoff;
     const isBooked = bookedIds.has(f.customer.id) && untouched;
     const isCancelledRecovery = cancelledIds.has(f.customer.id) && untouched && !isBooked;
@@ -426,6 +457,7 @@ export async function getTodayFollowups(
       ownerName: f.customer.owner?.name || null,
       status,
       untouched,
+      isNew,
       isStale,
       isBooked,
       isCancelledRecovery,
