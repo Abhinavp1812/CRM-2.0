@@ -44,6 +44,11 @@ next-env.d.ts
 /src/generated/prisma
 
 # Local data and backups (never commit customer data)
+# NOTE: *.sql was previously blanket-excluding this too, which silently
+# swallowed every prisma/migrations/**/migration.sql - the two migrations
+# committed before this rule existed were unaffected (already tracked),
+# but every migration since would have been dropped without a trace.
 /data/
 /backup/
 *.sql
+!prisma/migrations/**/*.sql
