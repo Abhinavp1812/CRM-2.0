@@ -30,12 +30,14 @@ export default async function AdminStatsPage() {
       const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
       const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
 
-      const [ownedCount, ownedActive, ownedDnc, callsThisWeek, remarksThisWeek, dueToday] = await Promise.all([
+      const [ownedCount, ownedActive, ownedDnc, callsThisWeek, dueToday, customersContacted, customersBooked] = await Promise.all([
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { isNot: null } } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: true } }),
+        // A call is a call whether it's logged with the dedicated button or simply
+        // recorded by saving a remark - saving a remark always stamps lastContactedAt
+        // too, so it represents a real contact just as much. One column, not two.
         prisma.activityLog.count({ where: { userId: a.id, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
-        prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", createdAt: { gte: weekAgo } } }),
         prisma.followup.count({
           where: {
             customer: { ownerId: a.id, deletedAt: null, doNotContact: false },
@@ -43,9 +45,23 @@ export default async function AdminStatsPage() {
             currentRemark: { not: null },
           },
         }),
+        // Conversion: every owned customer this agent has ever reached (lifetime,
+        // not time-boxed - "these customers"), and of those, how many are now a
+        // paying customer (customerType flips to CUSTOMER on their first booking).
+        prisma.customer.count({
+          where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { lastContactedAt: { not: null } } },
+        }),
+        prisma.customer.count({
+          where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { lastContactedAt: { not: null } }, customerType: "CUSTOMER" },
+        }),
       ]);
 
-      return { id: a.id, name: a.name, onLeave: !!a.onLeaveFrom, ownedCount, ownedActive, ownedDnc, callsThisWeek, remarksThisWeek, dueToday };
+      return {
+        id: a.id, name: a.name, onLeave: !!a.onLeaveFrom,
+        ownedCount, ownedActive, ownedDnc, callsThisWeek, dueToday,
+        customersContacted, customersBooked,
+        conversionRate: customersContacted > 0 ? Math.round((customersBooked / customersContacted) * 100) : 0,
+      };
     })
   );
 
@@ -67,7 +83,10 @@ export default async function AdminStatsPage() {
       </div>
 
       {/* Per-agent section */}
-      <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Per-Agent</h2>
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Per-Agent</h2>
+        <p className="text-xs text-slate-400">Contacted &amp; Booked are lifetime totals, not just the last 7 days</p>
+      </div>
 
       {/* Mobile: cards */}
       <div className="md:hidden space-y-3">
@@ -77,7 +96,7 @@ export default async function AdminStatsPage() {
               <p className="font-semibold text-gray-900">{a.name}</p>
               {a.onLeave && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">On Leave</span>}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="grid grid-cols-4 gap-2 text-center">
               <div className="bg-slate-50 rounded-lg p-2">
                 <p className="text-xs text-slate-500">Owned</p>
                 <p className="text-lg font-bold text-gray-900">{a.ownedCount}</p>
@@ -87,21 +106,24 @@ export default async function AdminStatsPage() {
                 <p className="text-lg font-bold text-gray-900">{a.ownedActive}</p>
               </div>
               <div className="bg-slate-50 rounded-lg p-2">
-                <p className="text-xs text-slate-500">Due Today</p>
-                <p className="text-lg font-bold text-gray-900">{a.dueToday}</p>
-              </div>
-              <div className="bg-slate-50 rounded-lg p-2">
                 <p className="text-xs text-slate-500">DNC</p>
                 <p className="text-lg font-bold text-gray-900">{a.ownedDnc}</p>
               </div>
               <div className="bg-slate-50 rounded-lg p-2">
-                <p className="text-xs text-slate-500">Calls 7d</p>
-                <p className="text-lg font-bold text-gray-900">{a.callsThisWeek}</p>
+                <p className="text-xs text-slate-500">Due Today</p>
+                <p className="text-lg font-bold text-gray-900">{a.dueToday}</p>
               </div>
-              <div className="bg-slate-50 rounded-lg p-2">
-                <p className="text-xs text-slate-500">Remarks 7d</p>
-                <p className="text-lg font-bold text-gray-900">{a.remarksThisWeek}</p>
+            </div>
+            <div className="mt-2 bg-slate-50 rounded-lg p-2 text-center">
+              <p className="text-xs text-slate-500">Calls (7d)</p>
+              <p className="text-lg font-bold text-gray-900">{a.callsThisWeek}</p>
+            </div>
+            <div className="mt-2 bg-blue-50 rounded-lg p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-blue-700 font-medium">Called {a.customersContacted.toLocaleString()} customers</p>
+                <p className="text-xs text-blue-600 mt-0.5">{a.customersBooked.toLocaleString()} of them booked</p>
               </div>
+              <p className="text-xl font-bold text-blue-700">{a.conversionRate}%</p>
             </div>
           </div>
         ))}
@@ -119,7 +141,9 @@ export default async function AdminStatsPage() {
                 <th className="px-4 py-3">DNC</th>
                 <th className="px-4 py-3">Due Today</th>
                 <th className="px-4 py-3">Calls (7d)</th>
-                <th className="px-4 py-3">Remarks (7d)</th>
+                <th className="px-4 py-3">Called</th>
+                <th className="px-4 py-3">Booked</th>
+                <th className="px-4 py-3">Conversion</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -134,7 +158,13 @@ export default async function AdminStatsPage() {
                   <td className="px-4 py-3 text-slate-700">{a.ownedDnc.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-700">{a.dueToday.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-700">{a.callsThisWeek.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-slate-700">{a.remarksThisWeek.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-slate-700">{a.customersContacted.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-slate-700">{a.customersBooked.toLocaleString()}</td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                      {a.conversionRate}%
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

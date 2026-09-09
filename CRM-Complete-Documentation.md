@@ -577,8 +577,7 @@ Personal performance dashboard for agents.
 - Active customers (have followup, not DNC)
 - DNC customers
 - Due today
-- **Calls** today / this week / this month — counts both a formal remark save (`REMARK_ADDED`, which always stamps `lastContactedAt` too — this is the normal day-to-day "call the customer, then Update" workflow) and an off-schedule `CALL_LOGGED` entry from the "Log a call" button on a customer's profile page. Counting `CALL_LOGGED` alone showed 0 for nearly every agent, since that button is a niche supplement, not how contact normally gets recorded.
-- **Remarks** added today / this week / this month — `REMARK_ADDED` only, so it is always ≤ Calls; the gap between the two is off-schedule calls that were logged without (yet) saving a remark.
+- **Calls** today / this week / this month — one number, not two. Counts a formal remark save (`REMARK_ADDED`, which always stamps `lastContactedAt` too — the normal day-to-day "call the customer, then Update" workflow) together with an off-schedule `CALL_LOGGED` entry from the "Log a call" button on a customer's profile page. There used to be a separate "Remarks" card next to this showing the `REMARK_ADDED` subset alone, which just duplicated most of the same number right next to it - removed, since a saved remark already *is* a call.
 
 ---
 
@@ -656,8 +655,10 @@ Full agent management interface.
 Performance overview for the entire team.
 
 **Shows per agent:**
-- **Calls** today / this week / this month (`REMARK_ADDED` + `CALL_LOGGED` combined — see `/stats` above)
-- **Remarks** today / this week / this month (`REMARK_ADDED` only)
+- **Calls (7d)** — `REMARK_ADDED` + `CALL_LOGGED` combined, same one-number rule as `/stats` above (no separate Remarks column here either)
+- **Called** — lifetime count of this agent's owned, non-DNC customers with `Followup.lastContactedAt` set (i.e. reached at least once, ever - not time-boxed like Calls (7d))
+- **Booked** — of those Called, how many are now `customerType: CUSTOMER` (have at least one booking)
+- **Conversion** — Booked ÷ Called as a percentage, badge-styled
 - Customers owned
 - Due today count
 

@@ -20,11 +20,12 @@ export default async function MyStatsPage() {
   const monthAgo = new Date(today);
   monthAgo.setDate(monthAgo.getDate() - 30);
 
+  // A call is a call whether it's logged with the dedicated button or simply
+  // recorded by saving a remark - saving a remark always stamps lastContactedAt
+  // too, so it represents a real contact just as much. One number, not two.
   const [
     ownedCount, activeCount, dncCount, dueToday,
-    callsThisWeek, remarksThisWeek,
-    callsThisMonth, remarksThisMonth,
-    callsToday, remarksToday,
+    callsToday, callsThisWeek, callsThisMonth,
   ] = await Promise.all([
     prisma.customer.count({ where: { ownerId: userId, deletedAt: null } }),
     prisma.customer.count({ where: { ownerId: userId, deletedAt: null, doNotContact: false, followup: { isNot: null } } }),
@@ -36,12 +37,9 @@ export default async function MyStatsPage() {
         currentRemark: { not: null },
       },
     }),
-    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
-    prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: weekAgo } } }),
-    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: monthAgo } } }),
-    prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: monthAgo } } }),
     prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: today, lt: tomorrow } } }),
-    prisma.activityLog.count({ where: { userId, activityType: "REMARK_ADDED", createdAt: { gte: today, lt: tomorrow } } }),
+    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
+    prisma.activityLog.count({ where: { userId, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: monthAgo } } }),
   ]);
 
   return (
@@ -60,24 +58,11 @@ export default async function MyStatsPage() {
         </div>
       </Section>
 
-      <Section title="Today">
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Calls" value={callsToday} color="blue" />
-          <Stat label="Remarks" value={remarksToday} color="green" />
-        </div>
-      </Section>
-
-      <Section title="Last 7 Days">
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Calls" value={callsThisWeek} color="blue" />
-          <Stat label="Remarks" value={remarksThisWeek} color="green" />
-        </div>
-      </Section>
-
-      <Section title="Last 30 Days">
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Calls" value={callsThisMonth} color="blue" />
-          <Stat label="Remarks" value={remarksThisMonth} color="green" />
+      <Section title="Calls">
+        <div className="grid grid-cols-3 gap-3">
+          <Stat label="Today" value={callsToday} color="blue" />
+          <Stat label="Last 7 Days" value={callsThisWeek} color="blue" />
+          <Stat label="Last 30 Days" value={callsThisMonth} color="blue" />
         </div>
       </Section>
     </Layout>
