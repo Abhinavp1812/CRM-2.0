@@ -164,23 +164,44 @@ export async function importRegistrationRows(
     ]);
   }
 
-  // Fill blanks on existing customers, in parallel batches
-  const updates: { id: string; data: Record<string, unknown> }[] = [];
+  // Fill blanks on existing customers. Only rows with at least one blank field
+  // to fill are included - most already-migrated customers have nothing to do
+  // here (as this run just proved: 0 updates needed for 15,091 already-known
+  // customers). But if that ever isn't true, one-at-a-time updates in batches
+  // of 30 is the exact pattern that timed out the bookings sync - so this uses
+  // the same single bulk SQL statement instead, chunked for safety at scale.
+  // Missing keys mean "leave unchanged" (COALESCE keeps the existing value).
+  type Fill = { id: string; name: string | null; gender: string | null; address: string | null; city: string | null; sector: string | null; customerIdExt: string | null };
+  const updates: Fill[] = [];
   for (const p of toUpdate) {
     const e = customerByPhone.get(p.phone)!;
-    const data: Record<string, unknown> = {};
-    if (!e.name && p.name) data.name = p.name;
-    if (!e.gender && p.gender) data.gender = p.gender;
-    if (!e.address && p.address) data.address = p.address;
-    if (!e.city && p.city) data.city = p.city;
-    if (!e.sector && p.sector) data.sector = p.sector;
-    if (!e.customerIdExt && p.customerIdExt) data.customerIdExt = p.customerIdExt;
-    if (Object.keys(data).length > 0) updates.push({ id: e.id, data });
+    const fill: Fill = {
+      id: e.id,
+      name: !e.name && p.name ? p.name : null,
+      gender: !e.gender && p.gender ? p.gender : null,
+      address: !e.address && p.address ? p.address : null,
+      city: !e.city && p.city ? p.city : null,
+      sector: !e.sector && p.sector ? p.sector : null,
+      customerIdExt: !e.customerIdExt && p.customerIdExt ? p.customerIdExt : null,
+    };
+    const hasFill = fill.name || fill.gender || fill.address || fill.city || fill.sector || fill.customerIdExt;
+    if (hasFill) updates.push(fill);
   }
-  for (let i = 0; i < updates.length; i += 30) {
-    await Promise.all(
-      updates.slice(i, i + 30).map((u) => prisma.customer.update({ where: { id: u.id }, data: u.data }))
-    );
+  for (let i = 0; i < updates.length; i += 2000) {
+    const chunk = updates.slice(i, i + 2000);
+    await prisma.$executeRaw`
+      UPDATE "Customer" c
+      SET
+        "name" = COALESCE(v->>'name', c."name"),
+        "gender" = COALESCE(v->>'gender', c."gender"),
+        "address" = COALESCE(v->>'address', c."address"),
+        "city" = COALESCE(v->>'city', c."city"),
+        "sector" = COALESCE(v->>'sector', c."sector"),
+        "customerIdExt" = COALESCE(v->>'customerIdExt', c."customerIdExt"),
+        "updatedAt" = NOW()
+      FROM json_array_elements(${JSON.stringify(chunk)}::json) AS v
+      WHERE c.id = v->>'id'
+    `;
   }
 
   const healedFollowups = await healMissingFollowups(ctx.userId, followupDays);

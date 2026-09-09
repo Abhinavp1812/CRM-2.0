@@ -309,14 +309,18 @@ export async function importBookingRows(
   const customerIds = Array.from(latestInSync.keys());
   if (customerIds.length > 0) {
     const [existingFollowups, allBookingDates] = await Promise.all([
-      prisma.followup.findMany({
-        where: { customerId: { in: customerIds } },
-        select: { customerId: true, nextFollowupDate: true },
-      }),
-      prisma.booking.findMany({
-        where: { customerId: { in: customerIds }, bookingDate: { not: null } },
-        select: { customerId: true, bookingDate: true },
-      }),
+      findManyChunked(customerIds, (chunk) =>
+        prisma.followup.findMany({
+          where: { customerId: { in: chunk } },
+          select: { customerId: true, nextFollowupDate: true },
+        })
+      ),
+      findManyChunked(customerIds, (chunk) =>
+        prisma.booking.findMany({
+          where: { customerId: { in: chunk }, bookingDate: { not: null } },
+          select: { customerId: true, bookingDate: true },
+        })
+      ),
     ]);
     const followupByCustomer = new Map(existingFollowups.map((f) => [f.customerId, f.nextFollowupDate]));
     const overallMax = new Map<string, Date>();
@@ -359,20 +363,28 @@ export async function importBookingRows(
         prisma.followup.createMany({ data: chunk, skipDuplicates: true })
       );
     }
-    for (let i = 0; i < updates.length; i += 30) {
-      await Promise.all(
-        updates.slice(i, i + 30).map(({ cid, finalDate }) =>
-          prisma.followup.update({
-            where: { customerId: cid },
-            data: {
-              nextFollowupDate: finalDate,
-              currentRemark: null, currentNote: null,
-              lastContactedAt: null, lastContactedById: null,
-              updatedById: ctx.userId,
-            },
-          })
-        )
-      );
+    // One-at-a-time updates don't scale: hundreds of individual UPDATE round trips are
+    // exactly what blew the function timeout here. A single bulk SQL statement (same
+    // json_array_elements pattern the followups importer already uses) replaces all of
+    // them with one query per chunk, regardless of how many customers need resetting.
+    if (updates.length > 0) {
+      const updateData = updates.map(({ cid, finalDate }) => ({ cid, fd: finalDate.toISOString() }));
+      for (let i = 0; i < updateData.length; i += 2000) {
+        const chunk = updateData.slice(i, i + 2000);
+        await prisma.$executeRaw`
+          UPDATE "Followup" f
+          SET
+            "nextFollowupDate" = (v->>'fd')::timestamptz,
+            "currentRemark" = NULL,
+            "currentNote" = NULL,
+            "lastContactedAt" = NULL,
+            "lastContactedById" = NULL,
+            "updatedById" = ${ctx.userId},
+            "updatedAt" = NOW()
+          FROM json_array_elements(${JSON.stringify(chunk)}::json) AS v
+          WHERE f."customerId" = v->>'cid'
+        `;
+      }
     }
     if (logs.length > 0) {
       await createManyChunked(logs, (chunk) => prisma.activityLog.createMany({ data: chunk }));
