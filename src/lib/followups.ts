@@ -30,6 +30,7 @@ export interface FollowupRow {
   lastContactedAt: Date | null;
   lastBookingDate: Date | null;
   lastBookingSalon: string | null;
+  registeredAt: Date | null;
   ownerName: string | null;
   status: "OVERDUE" | "DUE_TODAY" | "UPCOMING";
   untouched: boolean;
@@ -380,6 +381,11 @@ export async function getTodayFollowups(
             salon: { select: { name: true } },
           },
         },
+        registrations: {
+          orderBy: { onboardingDate: "desc" as const },
+          take: 1,
+          select: { onboardingDate: true },
+        },
       },
     },
   };
@@ -504,6 +510,7 @@ export async function getTodayFollowups(
       lastContactedAt: f.lastContactedAt,
       lastBookingDate: lastBooking?.bookingDate || null,
       lastBookingSalon: lastBooking?.salon?.name || lastBooking?.salonNameSnapshot || null,
+      registeredAt: f.customer.registrations[0]?.onboardingDate ?? null,
       ownerName: f.customer.owner?.name || null,
       status,
       untouched,

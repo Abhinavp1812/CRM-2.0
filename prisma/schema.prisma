@@ -91,6 +91,7 @@ model Registration {
   createdAt      DateTime  @default(now())
 
   @@index([customerId])
+  @@index([customerId, onboardingDate]) // supports the Registered tab's newest-first sort
 }
 
 // =================================================================
@@ -133,6 +134,7 @@ model Booking {
 
   @@index([customerId])
   @@index([bookingDate])
+  @@index([customerId, bookingDate]) // supports the Booked (type) tab's newest-first sort
   @@index([salonId])
   @@index([status])
 }

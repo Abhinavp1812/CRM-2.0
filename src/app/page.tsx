@@ -102,6 +102,7 @@ export default async function HomePage({
                     <th className="px-4 py-3">Customer</th>
                     {isAdmin && <th className="px-4 py-3">Owner</th>}
                     <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Registered</th>
                     <th className="px-4 py-3">Phone</th>
                     <th className="px-4 py-3">City</th>
                     <th className="px-4 py-3">Last Booking</th>
@@ -244,6 +245,7 @@ function FollowupRow({
   showOwner: boolean;
 }) {
   const lastBookingText = f.lastBookingDate ? new Date(f.lastBookingDate).toLocaleDateString("en-IN") : "-";
+  const registeredText = f.registeredAt ? new Date(f.registeredAt).toLocaleDateString("en-IN") : "-";
   const lastContactText = f.lastContactedAt ? new Date(f.lastContactedAt).toLocaleDateString("en-IN") : "Never";
   const followupText = new Date(f.effectiveFollowupDate).toLocaleDateString("en-IN");
   const followupIso = toLocalIso(new Date(f.nextFollowupDate));
@@ -277,6 +279,7 @@ function FollowupRow({
         <td className="px-4 py-3 text-sm text-slate-600">{f.ownerName || "-"}</td>
       )}
       <td className="px-4 py-3"><CustomerTypeBadge type={f.customerType} doNotContact={f.doNotContact} /></td>
+      <td className="px-4 py-3 text-slate-600 text-sm whitespace-nowrap">{registeredText}</td>
       <td className="px-4 py-3 font-mono text-slate-600 text-xs whitespace-nowrap">{formatPhone(f.phone)}</td>
       <td className="px-4 py-3 text-slate-500 text-sm">{f.city ?? "-"}</td>
       <td className="px-4 py-3 text-slate-600 text-sm">
@@ -356,6 +359,7 @@ function FollowupCard({
         <span className="font-mono">{formatPhone(f.phone)}</span>
         {f.city && <span>{f.city}</span>}
         {showOwner && f.ownerName && <span>Owner: <strong className="text-slate-700">{f.ownerName}</strong></span>}
+        {f.registeredAt && <span>Registered: {new Date(f.registeredAt).toLocaleDateString("en-IN")}</span>}
         <span>Followup: <strong className="text-slate-700">{followupText}</strong></span>
         <span>Last contact: {lastContactText}</span>
       </div>
