@@ -385,48 +385,83 @@ export async function getTodayFollowups(
   };
 
   // The Registered and Booked (type) tabs are meant to surface newest-first,
-  // across every page - not just a capped preview on page 1. Both sort by
-  // firstSeenAt: when this customer first showed up in the CRM at all. That's
-  // exactly right for Registered. For Booked (type) it correctly surfaces a
-  // brand-new customer's first booking (the common case - a first booking is
-  // what creates the customer record), but won't re-surface a repeat booking
-  // from a long-standing customer, since that never touches this field.
-  // Prisma can't order a findMany by a to-many relation's most-recent date in
-  // one query, which is what a true "most recent booking" sort would need -
-  // flagged this trade-off rather than guessing at unverified raw SQL for it.
-  const recencyOrderBy =
-    filter === "registered" || filter === "booked_type" ? { customer: { firstSeenAt: "desc" as const } } : null;
+  // across every page - not just a capped page-1 preview. A plain sort by
+  // Customer.firstSeenAt doesn't actually do that: every customer created in
+  // the same bulk sync batch shares the exact same value (Postgres's now()
+  // is fixed for the whole transaction, not per row), so within one sync run
+  // the order is arbitrary. What "recent" really means here is each row's own
+  // date - onboardingDate for a registration, the booking date for a booking
+  // - which Prisma can't sort a findMany by (it can't order by an aggregate
+  // of a to-many relation; confirmed by a type error, not assumed). A single
+  // raw query resolves the correctly ordered, paginated id list directly:
+  // NULLS LAST so a customer without one yet still appears, just after the
+  // ones with a real date, falling back to firstSeenAt as the final tiebreak.
+  const isRegistered = filter === "registered";
+  const isBookedType = filter === "booked_type";
+  const newCutoff = new Date(today);
+  newCutoff.setDate(newCutoff.getDate() - NEW_LEAD_DAYS);
 
-  const normalFollowupsPromise = prisma.followup.findMany({
-    where,
-    include: followupInclude,
-    orderBy: recencyOrderBy ?? { nextFollowupDate: "asc" },
-    skip: (page - 1) * pageSize,
-    take: pageSize,
-  });
+  let followups: Awaited<ReturnType<typeof prisma.followup.findMany<{ include: typeof followupInclude }>>>;
 
-  // Page 1 only, and only outside the two recency-sorted tabs above (which
-  // already put the newest records first on every page): pin a small batch of
-  // untouched, freshly-dated leads to the top - a synced or bulk-scheduled
-  // lead the customer hasn't seen yet. This never changes the underlying
-  // skip/take math for the normal query above, so later pages are unaffected
-  // and nothing is skipped or duplicated there.
-  let newFollowups: Awaited<typeof normalFollowupsPromise> = [];
-  if (page === 1 && !recencyOrderBy) {
-    const newCutoff = new Date(today);
-    newCutoff.setDate(newCutoff.getDate() - NEW_LEAD_DAYS);
-    newFollowups = await prisma.followup.findMany({
-      where: { AND: [where, { lastContactedAt: null, updatedAt: { gte: newCutoff } }] },
+  if (isRegistered || isBookedType) {
+    const skip = (page - 1) * pageSize;
+    const ownerId = scope.userId;
+    const idRows = isRegistered
+      ? await prisma.$queryRaw<{ id: string }[]>`
+          SELECT c.id
+          FROM "Customer" c
+          LEFT JOIN "Registration" r ON r."customerId" = c.id
+          WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'NEW_REGISTRATION'
+            AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
+          GROUP BY c.id
+          ORDER BY MAX(r."onboardingDate") DESC NULLS LAST, c."firstSeenAt" DESC
+          LIMIT ${pageSize} OFFSET ${skip}
+        `
+      : await prisma.$queryRaw<{ id: string }[]>`
+          SELECT c.id
+          FROM "Customer" c
+          LEFT JOIN "Booking" b ON b."customerId" = c.id
+          WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'CUSTOMER'
+            AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
+          GROUP BY c.id
+          ORDER BY MAX(b."bookingDate") DESC NULLS LAST, c."firstSeenAt" DESC
+          LIMIT ${pageSize} OFFSET ${skip}
+        `;
+
+    const orderedIds = idRows.map((r) => r.id);
+    const rows = orderedIds.length
+      ? await prisma.followup.findMany({ where: { customerId: { in: orderedIds } }, include: followupInclude })
+      : [];
+    const byCustomerId = new Map(rows.map((f) => [f.customer.id, f]));
+    followups = orderedIds.map((id) => byCustomerId.get(id)).filter((f): f is NonNullable<typeof f> => f !== undefined);
+  } else {
+    const normalFollowupsPromise = prisma.followup.findMany({
+      where,
       include: followupInclude,
-      orderBy: { updatedAt: "desc" },
-      take: NEW_LEAD_CAP,
+      orderBy: { nextFollowupDate: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
-  }
 
-  const normalFollowups = await normalFollowupsPromise;
-  const newIds = new Set(newFollowups.map((f) => f.customer.id));
-  const followups =
-    page === 1 ? [...newFollowups, ...normalFollowups.filter((f) => !newIds.has(f.customer.id))] : normalFollowups;
+    // Page 1 only: pin a small batch of untouched, freshly-dated leads to the
+    // top - a synced or bulk-scheduled lead the customer hasn't seen yet. This
+    // never changes the underlying skip/take math for the normal query above,
+    // so later pages are unaffected and nothing is skipped or duplicated there.
+    let newFollowups: Awaited<typeof normalFollowupsPromise> = [];
+    if (page === 1) {
+      newFollowups = await prisma.followup.findMany({
+        where: { AND: [where, { lastContactedAt: null, updatedAt: { gte: newCutoff } }] },
+        include: followupInclude,
+        orderBy: { updatedAt: "desc" },
+        take: NEW_LEAD_CAP,
+      });
+    }
+
+    const normalFollowups = await normalFollowupsPromise;
+    const pinnedIds = new Set(newFollowups.map((f) => f.customer.id));
+    followups =
+      page === 1 ? [...newFollowups, ...normalFollowups.filter((f) => !pinnedIds.has(f.customer.id))] : normalFollowups;
+  }
 
   const customerIds = followups.map((f) => f.customer.id);
   const latestPaidByCustomer = await getLatestPaidBookingByCustomer(customerIds);
@@ -435,7 +470,7 @@ export async function getTodayFollowups(
     const fd = startOfDay(f.nextFollowupDate);
     const lastBooking = f.customer.bookings[0];
     const untouched = !f.currentRemark && !f.lastContactedAt;
-    const isNew = newIds.has(f.customer.id);
+    const isNew = !f.lastContactedAt && f.updatedAt >= newCutoff;
     const isStale = !!f.lastContactedAt && f.lastContactedAt < staleCutoff;
     const isBooked = bookedIds.has(f.customer.id) && untouched;
     const isCancelledRecovery = cancelledIds.has(f.customer.id) && untouched && !isBooked;
