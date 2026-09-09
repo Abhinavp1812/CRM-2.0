@@ -332,7 +332,7 @@ export default function TeamManager() {
             <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Full name" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />
             <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
             <input type="password" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Initial password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-            <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">New customers from the daily Google Sheets sync are auto-assigned to whichever active agent has the fewest customers — this agent is included as soon as they&apos;re created, no setup needed.</p>
+            <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">New customers from the hourly Google Sheets sync are auto-assigned to whichever active agent has the fewest customers — this agent is included as soon as they&apos;re created, no setup needed.</p>
           </div>
           <ModalFooter onClose={() => setShowAdd(false)} onConfirm={createAgent} confirmLabel="Create" />
         </Modal>

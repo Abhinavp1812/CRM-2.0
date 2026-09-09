@@ -88,7 +88,7 @@ export default function SyncPanel({ status, bookingFollowupDays }: { status: Syn
           Sheets must be shared (Viewer) with{" "}
           <span className="font-mono text-gray-700 select-all">{status.serviceAccountEmail}</span>.
           {status.scheduled
-            ? " A scheduled sync also runs automatically every day."
+            ? " A scheduled sync also runs automatically every hour."
             : " Scheduled sync is off until CRON_SECRET is set."}
         </p>
       )}
