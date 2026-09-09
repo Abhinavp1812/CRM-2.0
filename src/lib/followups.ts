@@ -384,20 +384,35 @@ export async function getTodayFollowups(
     },
   };
 
+  // The Registered and Booked (type) tabs are meant to surface newest-first,
+  // across every page - not just a capped preview on page 1. Both sort by
+  // firstSeenAt: when this customer first showed up in the CRM at all. That's
+  // exactly right for Registered. For Booked (type) it correctly surfaces a
+  // brand-new customer's first booking (the common case - a first booking is
+  // what creates the customer record), but won't re-surface a repeat booking
+  // from a long-standing customer, since that never touches this field.
+  // Prisma can't order a findMany by a to-many relation's most-recent date in
+  // one query, which is what a true "most recent booking" sort would need -
+  // flagged this trade-off rather than guessing at unverified raw SQL for it.
+  const recencyOrderBy =
+    filter === "registered" || filter === "booked_type" ? { customer: { firstSeenAt: "desc" as const } } : null;
+
   const normalFollowupsPromise = prisma.followup.findMany({
     where,
     include: followupInclude,
-    orderBy: { nextFollowupDate: "asc" },
+    orderBy: recencyOrderBy ?? { nextFollowupDate: "asc" },
     skip: (page - 1) * pageSize,
     take: pageSize,
   });
 
-  // Page 1 only: pin a small batch of untouched, freshly-dated leads to the
-  // top - a synced or bulk-scheduled lead a customer hasn't seen yet. This
-  // never changes the underlying skip/take math for the normal query above,
-  // so later pages are unaffected and nothing is skipped or duplicated there.
+  // Page 1 only, and only outside the two recency-sorted tabs above (which
+  // already put the newest records first on every page): pin a small batch of
+  // untouched, freshly-dated leads to the top - a synced or bulk-scheduled
+  // lead the customer hasn't seen yet. This never changes the underlying
+  // skip/take math for the normal query above, so later pages are unaffected
+  // and nothing is skipped or duplicated there.
   let newFollowups: Awaited<typeof normalFollowupsPromise> = [];
-  if (page === 1) {
+  if (page === 1 && !recencyOrderBy) {
     const newCutoff = new Date(today);
     newCutoff.setDate(newCutoff.getDate() - NEW_LEAD_DAYS);
     newFollowups = await prisma.followup.findMany({

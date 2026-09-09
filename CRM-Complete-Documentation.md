@@ -476,6 +476,8 @@ Because `updatedAt` refreshes whenever a followup's date is set - by a sync, by 
 
 The pin only affects page 1: a small, capped side query is merged in ahead of the normal results there, and the main paginated query's `skip`/`take` math is completely unchanged, so no other page is affected and nothing is skipped or duplicated.
 
+**Exception — the Registered and Booked (type) tabs:** these two use a real sort instead of the capped page-1 pin, since the whole point of those tabs is browsing every recent one, not just a preview. Both order by `Customer.firstSeenAt` descending (when the customer first appeared in the CRM at all), which is exactly right for Registered. For Booked (type) it correctly surfaces a customer's first booking (the common case, since a first booking is what creates the customer record) but won't re-surface a repeat booking from an already long-standing customer - Prisma can't order a `findMany` by a to-many relation's most-recent date in a single query, which a true "most recent booking" sort would need.
+
 Implementation: `getTodayFollowups()` in `src/lib/followups.ts`.
 
 ### Stale Threshold
