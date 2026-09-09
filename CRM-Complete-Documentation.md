@@ -675,7 +675,7 @@ The team maintains two Google Sheets that are the source of truth for leads:
 | New registrations | "New Customers" (`REGISTRATIONS_SHEET_ID`) | `Delhi/NCR` (configurable via `REGISTRATIONS_SHEET_TABS`) |
 | Bookings | "Booking Dump" (`BOOKINGS_SHEET_ID`) | `Sheet1` (configurable via `BOOKINGS_SHEET_TABS`) |
 
-The CRM reads these sheets directly through the Google Sheets API using a **service account**. Nobody downloads or uploads files any more: an admin presses **Sync now**, or the automatic hourly sync runs on its own. Owner assignment still happens inside the CRM.
+The CRM reads these sheets directly through the Google Sheets API using a **service account**. Nobody downloads or uploads files any more: an admin presses **Sync now**, or the automatic daily sync runs on its own. Owner assignment still happens inside the CRM.
 
 ### Access setup (one time)
 
@@ -744,9 +744,9 @@ Both syncs are **idempotent**: running them again on the same sheet does nothing
 
 ### Scheduled sync
 
-`vercel.json` defines a cron that calls `GET /api/cron/sync` every hour, on the hour (`0 * * * *`). Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route rejects anything else. It runs registrations first, then bookings, and logs both to `ImportHistory` attributed to the first admin user.
+`vercel.json` defines a cron that calls `GET /api/cron/sync` once a day at 01:00 UTC (06:30 IST). Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route rejects anything else. It runs registrations first, then bookings, and logs both to `ImportHistory` attributed to the first admin user.
 
-**Plan requirement:** Vercel's Hobby (free) plan only allows a cron job to run **once per day** - it will not accept an hourly schedule. Hourly sync needs the **Pro** plan or higher. If the project is still on Hobby, this deployment will either be rejected or the cron silently capped, so confirm the plan on the Vercel dashboard before relying on it. Manual **Sync now** always works regardless of plan.
+**Plan requirement:** Vercel's Hobby (free) plan only allows a cron job to run **once per day** - confirmed directly by Vercel rejecting an hourly schedule with an error when this was tried. Hourly (or any more frequent) sync needs the **Pro** plan or higher. Manual **Sync now** always works regardless of plan.
 
 The auth middleware (`src/proxy.ts`) lets `/api/cron/*` through without a login session; the secret check happens in the route.
 
@@ -1042,7 +1042,7 @@ In Vercel project settings → Environment Variables, add:
 | `SUPER_ADMIN_EMAIL` | Your super admin email |
 | `SUPER_ADMIN_PASSWORD` | Your super admin password |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Entire contents of the service-account key file (one JSON blob) |
-| `CRON_SECRET` | A random string (e.g. `openssl rand -hex 32`) used by the hourly sync cron |
+| `CRON_SECRET` | A random string (e.g. `openssl rand -hex 32`) used by the daily sync cron |
 
 #### Step 6: Deploy
 
@@ -1063,7 +1063,7 @@ Run this locally — it connects to Neon directly and applies the migration.
 3. Press **Sync now** on Registrations first, then on Bookings
 4. (First deployment only) run Import Combined Followups from the footer link to migrate the old followup spreadsheet
 
-**Order matters.** Registrations creates the customer records. Bookings adds booking history and upgrades customer types. After that, the hourly cron keeps both in sync automatically (Pro plan or higher - see section 9).
+**Order matters.** Registrations creates the customer records. Bookings adds booking history and upgrades customer types. After that, the daily cron keeps both in sync automatically (hourly needs Pro or higher - see section 9).
 
 ---
 
@@ -1077,7 +1077,7 @@ Run this locally — it connects to Neon directly and applies the migration.
 | `SUPER_ADMIN_EMAIL` | Yes | Email to log in as Super Admin |
 | `SUPER_ADMIN_PASSWORD` | Yes | Password to log in as Super Admin |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes (for sync) | Full contents of the Google service-account key JSON. The sheets must be shared with its `client_email`. Alternative: `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY`. |
-| `CRON_SECRET` | For scheduled sync | Bearer token Vercel Cron sends to `/api/cron/sync`. Without it the hourly sync is disabled (manual sync still works). |
+| `CRON_SECRET` | For scheduled sync | Bearer token Vercel Cron sends to `/api/cron/sync`. Without it the scheduled sync is disabled (manual sync still works). |
 | `REGISTRATIONS_SHEET_ID` | No | Override the registrations spreadsheet (ID or full URL) |
 | `REGISTRATIONS_SHEET_TABS` | No | Comma-separated tabs to sync, default `Delhi/NCR` (e.g. `Delhi/NCR,Jaipur,Tricity`) |
 | `BOOKINGS_SHEET_ID` | No | Override the bookings spreadsheet (ID or full URL) |
@@ -1095,7 +1095,7 @@ Run this locally — it connects to Neon directly and applies the migration.
 | Limit | Value | Impact |
 |-------|-------|--------|
 | Serverless function timeout | **60 seconds** | Syncs must be optimized with bulk writes |
-| Cron jobs | **Once per day on Hobby, any interval on Pro+** | The scheduled sync is configured to run hourly, which needs Pro or higher; use Sync now for anything more urgent |
+| Cron jobs | **Once per day on Hobby, any interval on Pro+** | The scheduled sync is configured to run once a day; use Sync now for anything more urgent, or upgrade to Pro for hourly |
 | Request body size | **4.5 MB** | Only affects the legacy followup upload |
 | Bandwidth | 100 GB/month | More than enough for a small team |
 | Function invocations | 100,000/month | More than enough |

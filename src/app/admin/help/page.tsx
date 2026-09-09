@@ -27,7 +27,7 @@ export default async function AdminHelpPage() {
         </HelpSection>
 
         <HelpSection title="Data Sync (Google Sheets)">
-          <p>Go to <strong>Data Sync</strong> in the sidebar. The CRM reads the team&apos;s Google Sheets directly — nothing needs to be downloaded or uploaded. Press <strong>Sync now</strong> on either card, or let the automatic hourly sync run:</p>
+          <p>Go to <strong>Data Sync</strong> in the sidebar. The CRM reads the team&apos;s Google Sheets directly — nothing needs to be downloaded or uploaded. Press <strong>Sync now</strong> on either card, or let the automatic daily sync run:</p>
           <HelpTable headers={["Sync", "What it does"]} rows={[
             ["Registrations", "Reads the New Customers sheet (Delhi/NCR tab). Adds new customers; existing customers keep their current agent (sticky ownership)."],
             ["Bookings", "Reads the Booking Dump sheet (Sheet1). Adds new orders only — known order numbers are skipped. New customers are created automatically, and NEW_REGISTRATION customers with a booking become CUSTOMER type."],

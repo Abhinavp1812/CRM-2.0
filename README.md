@@ -29,7 +29,7 @@ A full-stack CRM built for Style Lounge to manage customer follow-ups, bookings,
   - Balance team — redistributes all customers evenly across active agents
 - **Data Sync — Registrations** — pulls the "New Customers" Google Sheet directly (no file uploads); new customers are assigned to the least-loaded agent; existing customers keep their current agent.
 - **Data Sync — Bookings** — pulls the "Booking Dump" Google Sheet; known order numbers are skipped; customers who already exist keep their agent; NEW_REGISTRATION customers are upgraded to CUSTOMER type; followup dates set to booking date + 20 days.
-- **Scheduled sync** — a Vercel Cron job runs both syncs every hour; admins can also press "Sync now" any time.
+- **Scheduled sync** — a Vercel Cron job runs both syncs once a day; admins can also press "Sync now" any time.
 - **Safe to re-run** — syncs are idempotent (dedupe by phone and by Order No.), write in chunks of 1,000 rows, and end by giving any customer without a followup date one, so nobody falls out of the agent queues.
 - **Error report download** — after any sync, download a `.xlsx` report of rows that could not be used, with the original data and reason.
 - **Data Sync hub** — per-agent customer breakdown with share bar, and full sync history (last 20 runs).
@@ -196,7 +196,7 @@ For production, also set `NEXTAUTH_URL` to your actual domain.
 | `SEED_ADMIN_EMAIL` | Yes | Admin email created when running `prisma db seed` |
 | `SEED_ADMIN_PASSWORD` | Yes | Admin password created when running `prisma db seed` |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes (for sync) | Full contents of the Google service-account JSON key. The sheets must be shared with its `client_email` as Viewer. Alternative: `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY`. |
-| `CRON_SECRET` | For scheduled sync | Random string; Vercel Cron sends it as a bearer token to `/api/cron/sync`. Hourly cron schedules need Vercel Pro or higher - Hobby only allows once a day. |
+| `CRON_SECRET` | For scheduled sync | Random string; Vercel Cron sends it as a bearer token to `/api/cron/sync`. Hobby plan only allows once a day - more frequent schedules need Vercel Pro or higher. |
 | `REGISTRATIONS_SHEET_ID` | No | Overrides the registrations spreadsheet (ID or full URL). |
 | `REGISTRATIONS_SHEET_TABS` | No | Comma-separated tab names to sync (default `Delhi/NCR`). |
 | `BOOKINGS_SHEET_ID` | No | Overrides the bookings spreadsheet (ID or full URL). |
