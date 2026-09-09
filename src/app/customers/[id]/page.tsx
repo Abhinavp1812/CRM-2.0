@@ -219,7 +219,7 @@ function activityLabel(a: Activity): string {
       return "Follow-up moved: " + oldD + " → " + newD;
     }
     case "OWNER_CHANGED": return "Owner: " + (a.oldValue || "-") + " → " + (a.newValue || "-");
-    case "CUSTOMER_IMPORTED": return "Imported (registration CSV)";
+    case "CUSTOMER_IMPORTED": return "Customer added";
     case "BOOKING_IMPORTED": return "Booking imported";
     case "REGISTRATION_IMPORTED": return "Registration imported";
     case "CUSTOMER_TYPE_CHANGED": return "Type: " + a.oldValue + " → " + a.newValue;
