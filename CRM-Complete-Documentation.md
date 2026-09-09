@@ -13,7 +13,7 @@
 6. [Database Schema — Every Table Explained](#6-database-schema--every-table-explained)
 7. [Core Business Logic — Followups](#7-core-business-logic--followups)
 8. [Pages & Features](#8-pages--features)
-9. [Import System](#9-import-system)
+9. [Data Sync — Google Sheets](#9-data-sync--google-sheets)
 10. [Data Normalization Logic](#10-data-normalization-logic)
 11. [Profile & Photo System](#11-profile--photo-system)
 12. [Admin Features](#12-admin-features)
@@ -48,7 +48,8 @@ This is a custom-built Customer Relationship Management system built specificall
 | Database | PostgreSQL (via Neon) | Reliable relational DB, free tier |
 | Authentication | NextAuth v5 (beta) | JWT sessions, credentials login |
 | Password Hashing | bcryptjs | Secure password storage |
-| File Parsing | xlsx (SheetJS) | Read CSV and Excel files |
+| Lead Source | Google Sheets API (service account) | Pull registrations and bookings straight from the team's sheets |
+| File Parsing | xlsx (SheetJS) | Error-report export; legacy followup migration upload |
 | Hosting | Vercel (Hobby free tier) | Zero-config Next.js deployment |
 | Language | TypeScript | Type safety across the full stack |
 
@@ -388,15 +389,15 @@ The dropdown list agents see when logging a remark. Fully configurable from admi
 
 ### Table: `ImportHistory`
 
-Log of every CSV import ever done.
+Log of every sync run (and, historically, every CSV import).
 
 | Field | Type | Description |
 |-------|------|-------------|
 | id | String (cuid) | Unique ID |
 | importType | Enum (REGISTRATIONS/BOOKINGS) | Which type of import |
-| filename | String | Original filename uploaded |
-| uploadedById | String | FK to User — who uploaded |
-| totalRows | Int | Total rows in file |
+| filename | String | Source label, e.g. `Google Sheet: Delhi/NCR` (or the original filename for old uploads) |
+| uploadedById | String | FK to User — who triggered it (scheduled runs use the first admin) |
+| totalRows | Int | Total rows read |
 | newCount | Int | New records created |
 | updatedCount | Int | Existing records updated |
 | skippedCount | Int | Rows that were skipped |
@@ -489,13 +490,17 @@ This is enforced at the database query level, not just the UI level.
 
 ### Round-Robin Assignment
 
-When new customers are imported and have no owner (or their owner name doesn't match any agent), they are automatically assigned via **round-robin**:
+When new customers arrive from a sync and have no owner (or their owner name doesn't match any agent), they are automatically assigned to the **least-loaded agent**:
 
 1. Load all active, non-leave agents
 2. Count how many customers each agent currently owns
-3. Assign new customers cyclically: agent 1, agent 2, agent 3, agent 1, agent 2...
+3. For every new customer, pick the agent with the fewest customers (ties go to the first agent), then bump that agent's count
 
-**Sticky ownership:** If a customer already has an agent assigned, importing them again NEVER changes their agent. The existing assignment is always preserved.
+Because the sync runs often with only a handful of new rows each time, "fewest customers first" keeps the team balanced over time, where a plain cyclic round-robin would keep favouring the first agent in the list.
+
+**Sticky ownership:** If a customer already has an agent assigned, syncing them again NEVER changes their agent. The existing assignment is always preserved.
+
+Shared implementation: `src/lib/sync/assignment.ts`.
 
 ---
 
@@ -605,13 +610,15 @@ View and re-engage customers who are DNC or have no active followup.
 
 ---
 
-### `/admin/imports` — Imports Hub
+### `/admin/imports` — Data Sync Hub
 
-Three import cards + agent breakdown table + import history.
+Two sync cards (Registrations, Bookings) with a **Sync now** button each, the agent breakdown table, and the sync history. A footer link keeps the legacy one-time "Import Combined Followups" upload reachable.
+
+Each card shows which Google Sheet and tab it reads, links to the sheet, and after a run shows the counts, the per-agent auto-assignment breakdown, and a **Download Error Report** button for rows that could not be used.
 
 **Agent breakdown:** Shows each agent's name, status (Active/On Leave/Inactive), customer count, and percentage share of total customers.
 
-**Import history:** Last 20 imports with filename, date, type, who uploaded, and counts.
+**Sync history:** Last 20 runs with source tab, date, type, who triggered it (scheduled runs are marked "auto"), and counts.
 
 ---
 
@@ -642,120 +649,101 @@ Performance overview for the entire team.
 
 ---
 
-## 9. Import System
+## 9. Data Sync — Google Sheets
 
-### Why imports exist
+### Why sync instead of upload
 
-The CRM was designed to ingest data from existing spreadsheets that the team was already using. The import system handles messy real-world data gracefully.
+The team maintains two Google Sheets that are the source of truth for leads:
 
-### Step 1: Parse (shared across all import types)
+| Data | Sheet | Tab(s) synced |
+|------|-------|---------------|
+| New registrations | "New Customers" (`REGISTRATIONS_SHEET_ID`) | `Delhi/NCR` (configurable via `REGISTRATIONS_SHEET_TABS`) |
+| Bookings | "Booking Dump" (`BOOKINGS_SHEET_ID`) | `Sheet1` (configurable via `BOOKINGS_SHEET_TABS`) |
 
-**Endpoint:** `POST /api/admin/import/parse`
+The CRM reads these sheets directly through the Google Sheets API using a **service account**. Nobody downloads or uploads files any more: an admin presses **Sync now**, or the daily scheduled sync runs on its own. Owner assignment still happens inside the CRM.
 
-When a file is selected, it is immediately uploaded for parsing:
-1. Reads the file (CSV or XLSX)
-2. Returns the list of sheet names in the file
-3. If only one sheet, auto-selects it
-4. If multiple sheets, shows a dropdown to select
+### Access setup (one time)
 
-The `parseFile()` function in `src/lib/parseFile.ts` uses the `xlsx` (SheetJS) library to read both CSV and Excel files into a unified row array format.
+1. Both spreadsheets are shared with the service account email as **Viewer**.
+2. The service-account key JSON is stored in the `GOOGLE_SERVICE_ACCOUNT_JSON` environment variable on Vercel (never in the repo).
+3. `CRON_SECRET` is set on Vercel so the scheduled sync endpoint can be called.
 
-The `getField()` function handles flexible column name matching. For example, `getField(row, "Contact Number", "Phone", "phone")` checks multiple possible column names and returns the first match. This handles inconsistent column naming across different spreadsheet versions.
+The Data Sync page shows the service-account email to share with, and warns if the key is missing.
 
----
+### How a sync runs
 
-### Step 2a: Import Registrations
+**Code:** `src/lib/googleSheets.ts` (Sheets client), `src/lib/sync/*` (importers), `src/app/api/admin/sync/[type]/route.ts` (manual), `src/app/api/cron/sync/route.ts` (scheduled).
 
-**Endpoint:** `POST /api/admin/import/registrations/commit`
+1. **Authenticate** — a JWT is signed with the service-account private key and exchanged for a short-lived access token (cached in memory). No Google SDK is needed.
+2. **Read the tab(s)** — `spreadsheets.values.get` with `FORMATTED_VALUE`, so dates arrive as `09-09-2026` strings and phone numbers stay intact. Row 1 is the header. Duplicate header names (the registrations sheet has two "Name" columns) are merged with the last non-empty value winning, so the cleaned-up name column is used. Blank rows are dropped.
+3. **Import** — the rows go through the same business logic the old uploads used (see below).
+4. **Log** — an `ImportHistory` row is written with the source tab and the counts, and the response carries per-row errors for the error-report download.
 
-**Expected columns:** Contact Number, Customer ID, Name, Gender, Onboarding Date, Address, City, Sector, Owner
+Both syncs are **idempotent**: running them again on the same sheet does nothing new, because registrations dedupe by phone and bookings dedupe by Order No.
 
-**What it does:**
+### Registrations sync
+
+**Endpoint:** `POST /api/admin/sync/registrations`
+
+**Columns read:** Contact Number (falls back to "Number with prefix"), Customer ID, Name, Gender, Onboarding Date, Address, City, Sector, Owner (optional, normally absent)
 
 1. **Pre-load** all users and existing customers into memory Maps
-2. **Round-robin setup** — count current customers per agent, set up cycling index
+2. **Assignment setup** — count current customers per active agent
 3. **Parse each row:**
-   - Normalize phone → skip if invalid
-   - Deduplicate within the file (same phone twice = skip second)
+   - Normalize phone → skip if invalid (rows with an empty Contact Number, like a bare `91`, are reported in the error export)
+   - Deduplicate within the sheet (same phone twice = second one skipped)
    - Look up existing customer by phone
-   - Determine owner: existing customer keeps their agent | named owner found → use them | named owner not found → round-robin | no owner → round-robin
+   - Determine owner: existing customer keeps their agent | named owner found → use them | named owner not found → least-loaded agent | no owner → least-loaded agent
 4. **Bulk writes:**
-   - `createMany` for all new customers
-   - Fetch new customer IDs by phone
+   - `createMany` for all new customers (type `NEW_REGISTRATION`)
    - `createMany` for followup records (all set to today's date initially)
-   - `createMany` for activity logs
-   - `createMany` for registration records
-   - Individual updates for existing customers (only fills in blank fields)
-5. **Returns:** new count, updated count, skipped count, error count, agent breakdown (how many assigned to each agent)
+   - `createMany` for activity logs and registration records
+   - Batched updates for existing customers (only fills in blank fields)
+5. **Returns:** new count, already-known count, skipped count, error count, agent breakdown
 
----
+### Bookings sync
 
-### Step 2b: Import Bookings
+**Endpoint:** `POST /api/admin/sync/bookings`
 
-**Endpoint:** `POST /api/admin/import/bookings/commit`
+**Columns read:** Order No., Customer Name, Contact Number, Salon Id, Salon Name, Salon Contact Number, Order Date, Booking Date, Booking Time, Status, Payment Status, AI Calling Status, City, State, Address, and all financial fields (GST, Gross Amount, discounts, fees, Grand Total Amount, Token Amount, Remaining Amount, Gateway Order ID, coupons, Style Lounge User).
 
-**Expected columns:** Order No, Customer Name, Contact Number, Salon Name, Salon Id, Order Date, Booking Date, Booking Time, Status, Payment Status, Grand Total, and all financial fields.
+1. **Pre-load** users, salons, existing customers and every known Order No.
+2. **Deduplication:** rows whose Order No. is already in the DB are skipped silently (the sheet is a growing dump; only new orders matter)
+3. **For each remaining row:** normalize phone, validate Order No., parse all fields
+4. **Bulk writes:**
+   - Create unknown salons
+   - Create unknown customers (type `CUSTOMER`), assigned to the least-loaded agent
+   - Promote `NEW_REGISTRATION` customers who now have a booking to `CUSTOMER` (owner unchanged)
+   - `createMany` bookings and activity logs
+5. **Followup scheduling (Latest Booking Wins):**
+   - Find the latest booking date per customer across the ENTIRE database
+   - If the latest booking in this sync IS the overall latest → followup = `bookingDate + bookingFollowupDays` (default 20), never earlier than today; remark and note are cleared
+   - Otherwise leave the existing followup alone
+   - Do-Not-Contact customers are never rescheduled
+6. **Returns:** new booking count, already-synced count, new customers, upgraded customers, followups created/updated/kept, agent breakdown
 
-**What it does:**
+### Scheduled sync
 
-1. **Pre-load** everything: users, salons, existing customers, their followups
-2. **Round-robin** setup for new customers without an owner
-3. **Deduplication:** If `orderNo` already exists in DB → skip (booking already imported)
-4. **For each row:**
-   - Normalize phone
-   - Look up or prepare new customer record
-   - Determine owner same as registrations
-   - Classify booking type
-5. **Bulk writes:**
-   - Create new customers (those not in DB) with `createMany`
-   - Upgrade `NEW_REGISTRATION` customers who now have bookings to `CUSTOMER` type
-   - Create all booking records with `createMany`
-   - Log activity for each booking
-6. **Followup scheduling (Latest Booking Wins logic):**
-   - Find the latest booking date for each customer across the ENTIRE database (not just this import)
-   - If the latest booking in the import IS the overall latest → schedule followup as: `bookingDate + bookingFollowupDays` (default 20 days)
-   - If there's a more recent booking in the DB already → skip (don't overwrite a newer followup date)
-   - This prevents importing an old bookings file from overwriting followup dates set by newer bookings
-7. **Returns:** new booking count, duplicate order count, upgraded customer count, followups created/updated/skipped, agent breakdown
+`vercel.json` defines a cron that calls `GET /api/cron/sync` once a day at 01:00 UTC (06:30 IST). Vercel sends `Authorization: Bearer <CRON_SECRET>`; the route rejects anything else. It runs registrations first, then bookings, and logs both to `ImportHistory` attributed to the first admin user. The Hobby plan only allows daily crons; manual **Sync now** covers anything more urgent.
 
----
+The auth middleware (`src/proxy.ts`) lets `/api/cron/*` through without a login session; the secret check happens in the route.
 
-### Step 2c: Import Combined Followups
+### Import Combined Followups (legacy, one-time)
 
-**Endpoint:** `POST /api/admin/import/followups/commit`
+**Endpoint:** `POST /api/admin/import/followups/commit` — still an upload, reachable from the footer of the Data Sync page.
 
 **Expected columns:** Contact Number, Owner, Next Follow Up date, Remarks, Detailed Remarks
 
-**Purpose:** One-time migration from the old spreadsheet. Imports the followup dates, remarks, and agent assignments that the team had been maintaining manually.
-
-**Optimized for large files (bulk SQL approach):**
-
-1. **Pre-load** all customers by phone and all agents by name in 2 parallel queries
-2. **Parse all rows in memory** — no DB calls during parsing
-3. **Pre-load** all existing followups for matched customers in 1 query
-4. **Single bulk SQL UPDATE** for all followup updates using `json_array_elements`:
-   ```sql
-   UPDATE "Followup" f
-   SET nextFollowupDate = ..., currentRemark = ..., ...
-   FROM json_array_elements($data::json) AS v
-   WHERE f."customerId" = v->>'cid'
-   ```
-   This updates ALL 13,866 customers in ONE database round trip.
-5. **`createMany`** for any new followup records
-6. **Single bulk SQL UPDATE** for owner changes
-
-**Result: 4 total DB queries regardless of file size** (instead of 55,000+ sequential calls).
-
----
+**Purpose:** One-time migration from the old spreadsheet. Imports the followup dates, remarks, and agent assignments that the team had been maintaining manually. It uses a handful of bulk SQL statements (`json_array_elements`) so a 13,000+ row file completes well inside the 60-second limit.
 
 ### Download Error Report
 
-After any import, if there were rows with errors, a **"Download Error Report"** button appears. Clicking it generates and downloads an Excel file containing:
-- Row number (which row in the original file failed)
-- Reason (why it failed)
+After any sync, if some rows could not be used, a **"Download Error Report"** button appears on that card. It generates an Excel file containing:
+- Sheet tab and row number (so the row can be found in Google Sheets)
+- Reason (why it was skipped)
 - All original data from that row
 
-This is done entirely client-side using the `xlsx` library — no extra API call needed. The error data is already in the browser from the import response.
+This is done entirely client-side using the `xlsx` library — no extra API call needed.
 
 ---
 
@@ -1015,6 +1003,8 @@ In Vercel project settings → Environment Variables, add:
 | `NEXTAUTH_URL` | `https://your-project-name.vercel.app` (your actual Vercel URL) |
 | `SUPER_ADMIN_EMAIL` | Your super admin email |
 | `SUPER_ADMIN_PASSWORD` | Your super admin password |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Entire contents of the service-account key file (one JSON blob) |
+| `CRON_SECRET` | A random string (e.g. `openssl rand -hex 32`) used by the daily sync cron |
 
 #### Step 6: Deploy
 
@@ -1028,15 +1018,14 @@ DATABASE_URL="your-neon-connection-string" npx prisma migrate deploy
 ```
 Run this locally — it connects to Neon directly and applies the migration.
 
-#### Step 8: Import Data
+#### Step 8: Connect the Google Sheets
 
-1. Log in as Admin (or Super Admin)
-2. Go to Admin → Imports
-3. Import Registrations CSV first
-4. Import Bookings CSV second
-5. Import Combined Followups CSV third
+1. Share the "New Customers" and "Booking Dump" spreadsheets with the service-account email (Viewer). The Data Sync page shows the exact address.
+2. Log in as Admin (or Super Admin) and go to Admin → Data Sync
+3. Press **Sync now** on Registrations first, then on Bookings
+4. (First deployment only) run Import Combined Followups from the footer link to migrate the old followup spreadsheet
 
-**Order matters.** Registrations creates the customer records. Bookings adds booking history and upgrades customer types. Combined Followups adds the followup dates and remarks.
+**Order matters.** Registrations creates the customer records. Bookings adds booking history and upgrades customer types. After that, the daily cron keeps both in sync automatically.
 
 ---
 
@@ -1049,6 +1038,12 @@ Run this locally — it connects to Neon directly and applies the migration.
 | `NEXTAUTH_URL` | Yes | Full URL of your deployed app (e.g., `https://crm-2-0-nu.vercel.app`). Used by NextAuth for redirect URLs. |
 | `SUPER_ADMIN_EMAIL` | Yes | Email to log in as Super Admin |
 | `SUPER_ADMIN_PASSWORD` | Yes | Password to log in as Super Admin |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes (for sync) | Full contents of the Google service-account key JSON. The sheets must be shared with its `client_email`. Alternative: `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY`. |
+| `CRON_SECRET` | For scheduled sync | Bearer token Vercel Cron sends to `/api/cron/sync`. Without it the daily sync is disabled (manual sync still works). |
+| `REGISTRATIONS_SHEET_ID` | No | Override the registrations spreadsheet (ID or full URL) |
+| `REGISTRATIONS_SHEET_TABS` | No | Comma-separated tabs to sync, default `Delhi/NCR` (e.g. `Delhi/NCR,Jaipur,Tricity`) |
+| `BOOKINGS_SHEET_ID` | No | Override the bookings spreadsheet (ID or full URL) |
+| `BOOKINGS_SHEET_TABS` | No | Comma-separated tabs to sync, default `Sheet1` |
 
 **Local development:** These are in the `.env` file (never commit this to GitHub).
 **Production:** These are in Vercel's Environment Variables settings panel.
@@ -1061,8 +1056,9 @@ Run this locally — it connects to Neon directly and applies the migration.
 
 | Limit | Value | Impact |
 |-------|-------|--------|
-| Serverless function timeout | **60 seconds** | Large imports must be optimized with bulk SQL |
-| Request body size | **4.5 MB** | CSV/XLSX files must be under this |
+| Serverless function timeout | **60 seconds** | Syncs must be optimized with bulk writes |
+| Cron jobs | **Once per day** | The scheduled sync runs daily; use Sync now for anything sooner |
+| Request body size | **4.5 MB** | Only affects the legacy followup upload |
 | Bandwidth | 100 GB/month | More than enough for a small team |
 | Function invocations | 100,000/month | More than enough |
 | Team members on Vercel | 1 (just the owner) | Only you can manage the project on Vercel |
@@ -1070,7 +1066,7 @@ Run this locally — it connects to Neon directly and applies the migration.
 
 ### Key constraint: 60-second timeout
 
-This is the most important limit. Every API route (serverless function) must complete within 60 seconds. For large CSV imports (13,000+ rows), this required major optimization:
+This is the most important limit. Every API route (serverless function) must complete within 60 seconds. For large syncs and imports (13,000+ rows), this required major optimization:
 
 **Solution:** Instead of processing each row with individual database calls (which would take minutes), all data is pre-loaded into memory, processed, and written back with bulk SQL in a few large operations. Total DB round trips: 4-5 regardless of file size.
 
@@ -1078,7 +1074,7 @@ This is the most important limit. Every API route (serverless function) must com
 
 Cannot save files to disk. Everything must go in the database. This is why:
 - Profile photos are stored as base64 in the database
-- CSV files are processed in memory and discarded after import
+- Sheet data is processed in memory and discarded after each sync
 
 ---
 

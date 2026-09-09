@@ -78,7 +78,7 @@ export default function FollowupsImportPage() {
   return (
     <Layout>
       <div className="mb-6">
-        <Link href="/admin/imports" className="text-sm text-blue-600 hover:underline">← Back to Imports</Link>
+        <Link href="/admin/imports" className="text-sm text-blue-600 hover:underline">← Back to Data Sync</Link>
         <h1 className="text-2xl font-bold text-gray-900 mt-2">Import Combined Followups</h1>
         <p className="text-sm text-gray-500 mt-1">
           Imports next followup dates, remarks, notes and agent assignments from your existing spreadsheet.

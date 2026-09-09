@@ -5,7 +5,7 @@ import Layout from "@/components/Layout";
 import {
   UserGroupIcon,
   NoSymbolIcon,
-  ArrowDownTrayIcon,
+  ArrowPathIcon,
   ExclamationTriangleIcon,
   ArrowUpTrayIcon,
   ClipboardDocumentListIcon,
@@ -20,7 +20,7 @@ export default async function AdminPage() {
     <Layout>
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Admin</h1>
-        <p className="text-sm text-slate-500 mt-1">Manage your team, imports, and data.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage your team, data sync, and exports.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -40,10 +40,10 @@ export default async function AdminPage() {
         />
         <AdminTile
           href="/admin/imports"
-          icon={ArrowDownTrayIcon}
+          icon={ArrowPathIcon}
           color="green"
-          title="Imports"
-          description="Upload registrations and bookings — auto-assigns new customers to agents"
+          title="Data Sync"
+          description="Pull registrations and bookings from Google Sheets — auto-assigns new customers to agents"
         />
         <AdminTile
           href="/admin/closed-followups"
@@ -72,7 +72,7 @@ export default async function AdminPage() {
           icon={QuestionMarkCircleIcon}
           color="blue"
           title="Help"
-          description="Admin guide: team management, imports, reassignment tools, and more"
+          description="Admin guide: team management, data sync, reassignment tools, and more"
         />
         <AdminTile
           href="/admin/danger"

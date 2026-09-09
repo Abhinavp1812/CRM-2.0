@@ -8,7 +8,7 @@ import {
   UserGroupIcon,
   ChartBarIcon,
   Cog6ToothIcon,
-  ArrowDownTrayIcon,
+  ArrowPathIcon,
   NoSymbolIcon,
   Bars3Icon,
   XMarkIcon,
@@ -83,7 +83,7 @@ export default function Sidebar() {
 
   const adminNav: NavItem[] = [
     { label: "Admin", href: "/admin", icon: Cog6ToothIcon },
-    { label: "Imports", href: "/admin/imports", icon: ArrowDownTrayIcon },
+    { label: "Data Sync", href: "/admin/imports", icon: ArrowPathIcon },
     { label: "Closed", href: "/admin/closed-followups", icon: NoSymbolIcon },
     { label: "Team Stats", href: "/admin/stats", icon: ChartBarIcon },
     { label: "Reassign Log", href: "/admin/reassignment-log", icon: ClipboardDocumentListIcon },

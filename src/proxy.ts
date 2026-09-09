@@ -5,8 +5,10 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isLoginPage = req.nextUrl.pathname.startsWith("/login");
   const isApiAuth = req.nextUrl.pathname.startsWith("/api/auth");
+  // Vercel Cron calls this with a bearer secret; the route validates it itself.
+  const isCron = req.nextUrl.pathname.startsWith("/api/cron");
 
-  if (isApiAuth) return NextResponse.next();
+  if (isApiAuth || isCron) return NextResponse.next();
   if (!isLoggedIn && !isLoginPage) {
     return NextResponse.redirect(new URL("/login", req.url));
   }

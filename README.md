@@ -27,15 +27,16 @@ A full-stack CRM built for Style Lounge to manage customer follow-ups, bookings,
   - Reassign customers — to a specific agent or round-robin across the team
   - Remove agent (must reassign customers first)
   - Balance team — redistributes all customers evenly across active agents
-- **Import Registrations** — upload CSV/XLSX; new customers are round-robin assigned; existing customers keep their current agent.
-- **Import Bookings** — upload CSV/XLSX; customers who already exist keep their agent; NEW_REGISTRATION customers are upgraded to CUSTOMER type; followup dates set to booking date + 20 days.
-- **Error report download** — after any import, download a `.xlsx` report of failed rows with the original data and reason.
-- **Imports hub** — per-agent customer breakdown with share bar, and full import history (last 20 imports).
+- **Data Sync — Registrations** — pulls the "New Customers" Google Sheet directly (no file uploads); new customers are assigned to the least-loaded agent; existing customers keep their current agent.
+- **Data Sync — Bookings** — pulls the "Booking Dump" Google Sheet; known order numbers are skipped; customers who already exist keep their agent; NEW_REGISTRATION customers are upgraded to CUSTOMER type; followup dates set to booking date + 20 days.
+- **Scheduled sync** — a Vercel Cron job runs both syncs once a day; admins can also press "Sync now" any time.
+- **Error report download** — after any sync, download a `.xlsx` report of rows that could not be used, with the original data and reason.
+- **Data Sync hub** — per-agent customer breakdown with share bar, and full sync history (last 20 runs).
 - **Closed Followups** — view completed/closed follow-ups.
 - **Team Stats** — team-wide performance statistics.
 
 ### Assignment Logic
-- **New customers** (no existing record) → round-robin across active, non-leave agents
+- **New customers** (no existing record) → assigned to the active, non-leave agent with the fewest customers
 - **Existing customers** (already in DB) → always keep their current agent (sticky ownership)
 - **Booking import upgrades** a NEW_REGISTRATION → CUSTOMER without changing the owner
 
@@ -190,6 +191,12 @@ For production, also set `NEXTAUTH_URL` to your actual domain.
 | `SUPER_ADMIN_PASSWORD` | Yes | Emergency admin password. Never stored in DB. |
 | `SEED_ADMIN_EMAIL` | Yes | Admin email created when running `prisma db seed` |
 | `SEED_ADMIN_PASSWORD` | Yes | Admin password created when running `prisma db seed` |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes (for sync) | Full contents of the Google service-account JSON key. The sheets must be shared with its `client_email` as Viewer. Alternative: `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY`. |
+| `CRON_SECRET` | For scheduled sync | Random string; Vercel Cron sends it as a bearer token to `/api/cron/sync`. |
+| `REGISTRATIONS_SHEET_ID` | No | Overrides the registrations spreadsheet (ID or full URL). |
+| `REGISTRATIONS_SHEET_TABS` | No | Comma-separated tab names to sync (default `Delhi/NCR`). |
+| `BOOKINGS_SHEET_ID` | No | Overrides the bookings spreadsheet (ID or full URL). |
+| `BOOKINGS_SHEET_TABS` | No | Comma-separated tab names to sync (default `Sheet1`). |
 
 ---
 
@@ -212,9 +219,8 @@ src/
     admin/                          # Admin-only pages
       page.tsx                      # Admin dashboard
       team/                         # Team management
-      imports/                      # Import hub (history + agent breakdown)
-      import/registrations/         # Import registrations page
-      import/bookings/              # Import bookings page
+      imports/                      # Data Sync hub (sync buttons, history, agent breakdown)
+      import/followups/             # One-time migration of the old followup spreadsheet
       stats/                        # Team stats
       closed-followups/             # Closed followups
     customers/                      # Customer list + detail
@@ -222,7 +228,8 @@ src/
     login/                          # Login page
     api/                            # All API routes
   components/                       # Shared UI components
-  lib/                              # Prisma client, file parser, utilities
+  lib/                              # Prisma client, Google Sheets client, sync importers, utilities
+  lib/sync/                         # registrations + bookings sync logic, owner assignment
   auth.ts                           # NextAuth config + super admin logic
   types/                            # TypeScript type extensions
 prisma/

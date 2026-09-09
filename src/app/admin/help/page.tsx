@@ -23,18 +23,19 @@ export default async function AdminHelpPage() {
             ["Remove Agent", "Must reassign customers first. Supports warm/cold split — send contacted customers to a specific agent, cold leads to round-robin."],
             ["Edit", "Update agent name, email, or password."],
           ]} />
-          <p className="mt-3 font-medium text-amber-700">Important: Agent names in the CRM must exactly match the Owner column in your CSV files (case-insensitive) for auto-assignment to work during imports.</p>
+          <p className="mt-3 font-medium text-amber-700">Note: the Google Sheets have no Owner column, so every new customer is auto-assigned to the agent with the fewest customers. If an Owner column is ever added, agent names in the CRM must match it exactly (case-insensitive).</p>
         </HelpSection>
 
-        <HelpSection title="Importing Data">
-          <p>Go to <strong>Imports</strong> in the sidebar. Two import types are supported:</p>
-          <HelpTable headers={["Import type", "What it does"]} rows={[
-            ["Registrations", "Adds new customers or updates existing ones. Existing customers keep their current agent (sticky ownership)."],
-            ["Bookings", "Adds booking records. New customers are created automatically. Upgrades NEW_REGISTRATION → CUSTOMER type."],
+        <HelpSection title="Data Sync (Google Sheets)">
+          <p>Go to <strong>Data Sync</strong> in the sidebar. The CRM reads the team&apos;s Google Sheets directly — nothing needs to be downloaded or uploaded. Press <strong>Sync now</strong> on either card, or let the daily automatic sync run:</p>
+          <HelpTable headers={["Sync", "What it does"]} rows={[
+            ["Registrations", "Reads the New Customers sheet (Delhi/NCR tab). Adds new customers; existing customers keep their current agent (sticky ownership)."],
+            ["Bookings", "Reads the Booking Dump sheet (Sheet1). Adds new orders only — known order numbers are skipped. New customers are created automatically, and NEW_REGISTRATION customers with a booking become CUSTOMER type."],
           ]} />
-          <p className="mt-3"><strong>Owner column in CSV:</strong> If the name matches an existing agent, that agent gets the customer. If not, the customer is parked temporarily with the owner name saved. When you later create an agent with that exact name, all their customers are automatically assigned.</p>
-          <p className="mt-2"><strong>Errors after import:</strong> Shown in an inline table — filter by name, phone, or reason. Download as XLSX if needed.</p>
-          <p className="mt-2"><strong>Follow-up days:</strong> The number of days added to the booking date to set the follow-up can be configured directly on the Import Bookings page (default: 20 days).</p>
+          <p className="mt-3"><strong>Assignment:</strong> New customers go to the active agent with the fewest customers. Existing customers are never reassigned by a sync.</p>
+          <p className="mt-2"><strong>Sheet access:</strong> Both sheets must stay shared (Viewer) with the service-account email shown at the top of the Data Sync page. If sharing is removed, the sync fails with a clear message.</p>
+          <p className="mt-2"><strong>Rows that cannot be used:</strong> Rows with no valid phone number (e.g. a bare 91) or duplicate phones/orders are counted as skipped. Use <strong>Download Error Report</strong> on the card to get them as XLSX with the sheet tab and row number.</p>
+          <p className="mt-2"><strong>Follow-up days:</strong> The number of days added to the booking date to set the follow-up can be changed on the Bookings card of the Data Sync page (default: 20 days).</p>
         </HelpSection>
 
         <HelpSection title="Reassignment Tools">
