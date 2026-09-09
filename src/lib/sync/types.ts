@@ -26,6 +26,8 @@ export interface SyncContext {
 export interface RegistrationsSyncResult {
   totalRows: number;
   newCount: number;
+  /** Customers that had no followup row at all and were given one (see heal.ts). */
+  healedFollowups: number;
   updateCount: number;
   skipCount: number;
   errorCount: number;
@@ -37,6 +39,8 @@ export interface RegistrationsSyncResult {
 export interface BookingsSyncResult {
   totalRows: number;
   newBookingCount: number;
+  /** Customers that had no followup row at all and were given one (see heal.ts). */
+  healedFollowups: number;
   duplicateOrderCount: number;
   upgradedCustomerCount: number;
   newCustomerCount: number;

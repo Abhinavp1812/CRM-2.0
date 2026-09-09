@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString } from "@/lib/normalize";
 import { loadAssignment } from "./assignment";
+import { createManyChunked, healMissingFollowups } from "./heal";
 import type { RegistrationsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
 
 /**
@@ -9,11 +10,17 @@ import type { RegistrationsSyncResult, SourceRow, SyncContext, SyncError } from 
  * - New phone → create customer (NEW_REGISTRATION), followup for today, registration record.
  * - Known phone → only fill in blank profile fields; owner is never changed.
  */
+const FOLLOWUP_DAYS_DEFAULT = 20;
+
 export async function importRegistrationRows(
   rows: SourceRow[],
   ctx: SyncContext
 ): Promise<RegistrationsSyncResult> {
-  const assign = await loadAssignment();
+  const [assign, settings] = await Promise.all([loadAssignment(), prisma.setting.findMany()]);
+  const followupDays = parseInt(
+    settings.find((s) => s.key === "bookingFollowupDays")?.value || `${FOLLOWUP_DAYS_DEFAULT}`,
+    10
+  );
 
   const existingCustomers = await prisma.customer.findMany({
     select: {
@@ -96,22 +103,24 @@ export async function importRegistrationRows(
     else toCreate.push(parsed);
   }
 
-  if (toCreate.length > 0) {
-    await prisma.customer.createMany({
-      data: toCreate.map((p) => ({
-        phone: p.phone,
-        name: p.name,
-        gender: p.gender,
-        address: p.address,
-        city: p.city,
-        sector: p.sector,
-        customerIdExt: p.customerIdExt,
-        customerType: "NEW_REGISTRATION" as const,
-        ownerId: p.ownerId,
-        pendingOwnerName: p.pendingOwnerName,
-      })),
-      skipDuplicates: true,
-    });
+if (toCreate.length > 0) {
+    await createManyChunked(toCreate, (chunk) =>
+      prisma.customer.createMany({
+        data: chunk.map((p) => ({
+          phone: p.phone,
+          name: p.name,
+          gender: p.gender,
+          address: p.address,
+          city: p.city,
+          sector: p.sector,
+          customerIdExt: p.customerIdExt,
+          customerType: "NEW_REGISTRATION" as const,
+          ownerId: p.ownerId,
+          pendingOwnerName: p.pendingOwnerName,
+        })),
+        skipDuplicates: true,
+      })
+    );
 
     const created = await prisma.customer.findMany({
       where: { phone: { in: toCreate.map((p) => p.phone) } },
@@ -120,27 +129,33 @@ export async function importRegistrationRows(
     const idByPhone = new Map(created.map((c) => [c.phone, c.id]));
     const withId = toCreate.filter((p) => idByPhone.has(p.phone));
 
-    await prisma.followup.createMany({
-      data: withId.map((p) => ({ customerId: idByPhone.get(p.phone)!, nextFollowupDate: today })),
-      skipDuplicates: true,
-    });
-    await prisma.activityLog.createMany({
-      data: withId.map((p) => ({
-        customerId: idByPhone.get(p.phone)!,
-        userId: ctx.userId,
-        activityType: "CUSTOMER_IMPORTED" as const,
-        note: p.ownerWarning || (p.autoAssigned ? "Registration synced from Google Sheet, auto-assigned" : "Registration synced from Google Sheet"),
-      })),
-    });
-    await prisma.registration.createMany({
-      data: withId.map((p) => ({
-        customerId: idByPhone.get(p.phone)!,
-        customerIdExt: p.customerIdExt,
-        onboardingDate: p.onboardingDate,
-        rawData: p.raw as never,
-      })),
-      skipDuplicates: true,
-    });
+    await createManyChunked(withId, (chunk) =>
+      prisma.followup.createMany({
+        data: chunk.map((p) => ({ customerId: idByPhone.get(p.phone)!, nextFollowupDate: today })),
+        skipDuplicates: true,
+      })
+    );
+    await createManyChunked(withId, (chunk) =>
+      prisma.activityLog.createMany({
+        data: chunk.map((p) => ({
+          customerId: idByPhone.get(p.phone)!,
+          userId: ctx.userId,
+          activityType: "CUSTOMER_IMPORTED" as const,
+          note: p.ownerWarning || (p.autoAssigned ? "Registration synced from Google Sheet, auto-assigned" : "Registration synced from Google Sheet"),
+        })),
+      })
+    );
+    await createManyChunked(withId, (chunk) =>
+      prisma.registration.createMany({
+        data: chunk.map((p) => ({
+          customerId: idByPhone.get(p.phone)!,
+          customerIdExt: p.customerIdExt,
+          onboardingDate: p.onboardingDate,
+          rawData: p.raw as never,
+        })),
+        skipDuplicates: true,
+      })
+    );
   }
 
   // Fill blanks on existing customers, in parallel batches
@@ -162,9 +177,12 @@ export async function importRegistrationRows(
     );
   }
 
+  const healedFollowups = await healMissingFollowups(ctx.userId, followupDays);
+
   return {
     totalRows: rows.length,
     newCount: toCreate.length,
+    healedFollowups,
     updateCount: toUpdate.length,
     skipCount,
     errorCount: errors.length,

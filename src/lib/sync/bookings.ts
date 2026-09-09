@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString, parseNumber } from "@/lib/normalize";
 import { loadAssignment } from "./assignment";
+import { createManyChunked, healMissingFollowups } from "./heal";
 import type { BookingsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
 
 const FOLLOWUP_DAYS_DEFAULT = 20;
@@ -180,35 +181,39 @@ export async function importBookingRows(
     if (!customerByPhone.has(p.phone) && !newCustomers.has(p.phone)) newCustomers.set(p.phone, p);
   }
   if (newCustomers.size > 0) {
-    await prisma.customer.createMany({
-      data: Array.from(newCustomers.values()).map((p) => {
-        const pick = assign.pickOwner(p.ownerRaw);
-        if (pick.warning) errors.push({ sheet: p.sheet, row: p.rowNum, reason: pick.warning, data: p.raw });
-        return {
-          phone: p.phone,
-          name: p.customerName,
-          city: p.salonCity,
-          customerType: "CUSTOMER" as const,
-          ownerId: pick.ownerId,
-          pendingOwnerName: pick.pendingOwnerName,
-        };
-      }),
-      skipDuplicates: true,
-    });
+    await createManyChunked(Array.from(newCustomers.values()), (chunk) =>
+      prisma.customer.createMany({
+        data: chunk.map((p) => {
+          const pick = assign.pickOwner(p.ownerRaw);
+          if (pick.warning) errors.push({ sheet: p.sheet, row: p.rowNum, reason: pick.warning, data: p.raw });
+          return {
+            phone: p.phone,
+            name: p.customerName,
+            city: p.salonCity,
+            customerType: "CUSTOMER" as const,
+            ownerId: pick.ownerId,
+            pendingOwnerName: pick.pendingOwnerName,
+          };
+        }),
+        skipDuplicates: true,
+      })
+    );
     const created = await prisma.customer.findMany({
       where: { phone: { in: Array.from(newCustomers.keys()) } },
       select: { id: true, phone: true, ownerId: true, customerType: true, doNotContact: true },
     });
     for (const c of created) customerByPhone.set(c.phone, c);
 
-    await prisma.activityLog.createMany({
-      data: created.map((c) => ({
-        customerId: c.id,
-        userId: ctx.userId,
-        activityType: "CUSTOMER_IMPORTED" as const,
-        note: "Customer created from booking sync (Google Sheet)",
-      })),
-    });
+    await createManyChunked(created, (chunk) =>
+      prisma.activityLog.createMany({
+        data: chunk.map((c) => ({
+          customerId: c.id,
+          userId: ctx.userId,
+          activityType: "CUSTOMER_IMPORTED" as const,
+          note: "Customer created from booking sync (Google Sheet)",
+        })),
+      })
+    );
   }
 
   // ---------- Promote NEW_REGISTRATION -> CUSTOMER ----------
@@ -235,48 +240,52 @@ export async function importBookingRows(
   // ---------- Bookings ----------
   const processable = toProcess.filter((p) => customerByPhone.has(p.phone));
   if (processable.length > 0) {
-    await prisma.booking.createMany({
-      data: processable.map((p) => ({
-        customerId: customerByPhone.get(p.phone)!.id,
-        orderNo: p.orderNo,
-        aiCallingStatus: p.aiCallingStatus,
-        orderDate: p.orderDate,
-        bookingDate: p.bookingDate,
-        bookingTime: p.bookingTime,
-        status: p.status || null,
-        paymentStatus: p.paymentStatus,
-        salonId: p.salonExtId ? salonByExtId.get(p.salonExtId) || null : null,
-        salonNameSnapshot: p.salonName,
-        city: p.salonCity,
-        state: p.salonState,
-        address: p.salonAddress,
-        gst: p.gst,
-        grossAmount: p.grossAmount,
-        stylistDiscount: p.stylistDiscount,
-        slotsDiscount: p.slotsDiscount,
-        couponsDiscount: p.couponsDiscount,
-        offersDiscount: p.offersDiscount,
-        hygieneFee: p.hygieneFee,
-        platformFee: p.platformFee,
-        grandTotal: p.grandTotal,
-        tokenAmount: p.tokenAmount,
-        remainingAmount: p.remainingAmount,
-        gatewayOrderId: p.gatewayOrderId,
-        styleLoungeCoupon: p.styleLoungeCoupon,
-        salonCoupon: p.salonCoupon,
-        styleLoungeUser: p.styleLoungeUser,
-        rawData: p.raw as never,
-      })),
-      skipDuplicates: true,
-    });
-    await prisma.activityLog.createMany({
-      data: processable.map((p) => ({
-        customerId: customerByPhone.get(p.phone)!.id,
-        userId: ctx.userId,
-        activityType: "BOOKING_IMPORTED" as const,
-        note: `Order ${p.orderNo} (${p.status || "no status"})`,
-      })),
-    });
+    await createManyChunked(processable, (chunk) =>
+      prisma.booking.createMany({
+        data: chunk.map((p) => ({
+          customerId: customerByPhone.get(p.phone)!.id,
+          orderNo: p.orderNo,
+          aiCallingStatus: p.aiCallingStatus,
+          orderDate: p.orderDate,
+          bookingDate: p.bookingDate,
+          bookingTime: p.bookingTime,
+          status: p.status || null,
+          paymentStatus: p.paymentStatus,
+          salonId: p.salonExtId ? salonByExtId.get(p.salonExtId) || null : null,
+          salonNameSnapshot: p.salonName,
+          city: p.salonCity,
+          state: p.salonState,
+          address: p.salonAddress,
+          gst: p.gst,
+          grossAmount: p.grossAmount,
+          stylistDiscount: p.stylistDiscount,
+          slotsDiscount: p.slotsDiscount,
+          couponsDiscount: p.couponsDiscount,
+          offersDiscount: p.offersDiscount,
+          hygieneFee: p.hygieneFee,
+          platformFee: p.platformFee,
+          grandTotal: p.grandTotal,
+          tokenAmount: p.tokenAmount,
+          remainingAmount: p.remainingAmount,
+          gatewayOrderId: p.gatewayOrderId,
+          styleLoungeCoupon: p.styleLoungeCoupon,
+          salonCoupon: p.salonCoupon,
+          styleLoungeUser: p.styleLoungeUser,
+          rawData: p.raw as never,
+        })),
+        skipDuplicates: true,
+      })
+    );
+    await createManyChunked(processable, (chunk) =>
+      prisma.activityLog.createMany({
+        data: chunk.map((p) => ({
+          customerId: customerByPhone.get(p.phone)!.id,
+          userId: ctx.userId,
+          activityType: "BOOKING_IMPORTED" as const,
+          note: `Order ${p.orderNo} (${p.status || "no status"})`,
+        })),
+      })
+    );
   }
 
   // ---------- Followups: latest booking wins ----------
@@ -341,7 +350,11 @@ export async function importBookingRows(
       }
     }
 
-    if (creates.length > 0) await prisma.followup.createMany({ data: creates, skipDuplicates: true });
+    if (creates.length > 0) {
+      await createManyChunked(creates, (chunk) =>
+        prisma.followup.createMany({ data: chunk, skipDuplicates: true })
+      );
+    }
     for (let i = 0; i < updates.length; i += 30) {
       await Promise.all(
         updates.slice(i, i + 30).map(({ cid, finalDate }) =>
@@ -357,12 +370,17 @@ export async function importBookingRows(
         )
       );
     }
-    if (logs.length > 0) await prisma.activityLog.createMany({ data: logs });
+    if (logs.length > 0) {
+      await createManyChunked(logs, (chunk) => prisma.activityLog.createMany({ data: chunk }));
+    }
   }
+
+  const healedFollowups = await healMissingFollowups(ctx.userId, followupDays);
 
   return {
     totalRows: rows.length,
     newBookingCount: processable.length,
+    healedFollowups,
     duplicateOrderCount,
     upgradedCustomerCount: upgradeIds.size,
     newCustomerCount: newCustomers.size,

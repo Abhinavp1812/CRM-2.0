@@ -52,6 +52,7 @@ interface SyncResponse {
   duplicateOrderCount?: number;
   upgradedCustomerCount?: number;
   newCustomerCount?: number;
+  healedFollowups?: number;
   followupsCreated?: number;
   followupsUpdated?: number;
   followupsSkipped?: number;
@@ -226,6 +227,12 @@ function SyncCard({
               <Stat label="Skipped" value={result.skipCount} color="amber" />
               <Stat label="Errors" value={result.errorCount} color="red" />
             </div>
+          )}
+
+          {(result.healedFollowups ?? 0) > 0 && (
+            <p className="text-xs text-gray-500 mt-2">
+              Gave {result.healedFollowups} customer{result.healedFollowups === 1 ? "" : "s"} a missing followup date, so they appear in an agent queue again.
+            </p>
           )}
 
           {result.autoAssignedCount > 0 && result.agentBreakdown.length > 0 && (

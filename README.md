@@ -30,6 +30,7 @@ A full-stack CRM built for Style Lounge to manage customer follow-ups, bookings,
 - **Data Sync — Registrations** — pulls the "New Customers" Google Sheet directly (no file uploads); new customers are assigned to the least-loaded agent; existing customers keep their current agent.
 - **Data Sync — Bookings** — pulls the "Booking Dump" Google Sheet; known order numbers are skipped; customers who already exist keep their agent; NEW_REGISTRATION customers are upgraded to CUSTOMER type; followup dates set to booking date + 20 days.
 - **Scheduled sync** — a Vercel Cron job runs both syncs once a day; admins can also press "Sync now" any time.
+- **Safe to re-run** — syncs are idempotent (dedupe by phone and by Order No.), write in chunks of 1,000 rows, and end by giving any customer without a followup date one, so nobody falls out of the agent queues.
 - **Error report download** — after any sync, download a `.xlsx` report of rows that could not be used, with the original data and reason.
 - **Data Sync hub** — per-agent customer breakdown with share bar, and full sync history (last 20 runs).
 - **Closed Followups** — view completed/closed follow-ups.

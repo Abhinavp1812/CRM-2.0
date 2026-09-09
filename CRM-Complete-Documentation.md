@@ -681,6 +681,10 @@ The Data Sync page shows the service-account email to share with, and warns if t
 
 Both syncs are **idempotent**: running them again on the same sheet does nothing new, because registrations dedupe by phone and bookings dedupe by Order No.
 
+5. **Heal missing followups** — a customer with no `Followup` row never appears in any agent queue. That should not happen, but a sync cut short by the 60-second limit can commit customers before their followups. Every sync therefore ends by giving any such customer a followup date (latest booking + follow-up days, or today if they have never booked). It only creates missing rows and never overwrites an existing followup. The count is shown on the sync card when it is not zero.
+
+**Large first sync:** the registrations sheet holds ~18,000 rows. All bulk inserts are written in chunks of 1,000 so no single statement carries the whole sheet. If a first sync still times out, simply press Sync now again — it resumes where it left off, because everything already written is skipped as a duplicate.
+
 ### Registrations sync
 
 **Endpoint:** `POST /api/admin/sync/registrations`
