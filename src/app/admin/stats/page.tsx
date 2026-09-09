@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
 
@@ -120,8 +121,18 @@ export default async function AdminStatsPage() {
             </div>
             <div className="mt-2 bg-blue-50 rounded-lg p-3 flex items-center justify-between">
               <div>
-                <p className="text-xs text-blue-700 font-medium">Called {a.customersContacted.toLocaleString()} customers</p>
-                <p className="text-xs text-blue-600 mt-0.5">{a.customersBooked.toLocaleString()} of them booked</p>
+                <p className="text-xs text-blue-700 font-medium">
+                  Called{" "}
+                  <Link href={`/admin/customers?ownerId=${a.id}&followupState=contacted`} className="underline underline-offset-2">
+                    {a.customersContacted.toLocaleString()} customers
+                  </Link>
+                </p>
+                <p className="text-xs text-blue-600 mt-0.5">
+                  <Link href={`/admin/customers?ownerId=${a.id}&followupState=contacted&customerType=CUSTOMER`} className="underline underline-offset-2">
+                    {a.customersBooked.toLocaleString()}
+                  </Link>{" "}
+                  of them booked
+                </p>
               </div>
               <p className="text-xl font-bold text-blue-700">{a.conversionRate}%</p>
             </div>
@@ -158,8 +169,16 @@ export default async function AdminStatsPage() {
                   <td className="px-4 py-3 text-slate-700">{a.ownedDnc.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-700">{a.dueToday.toLocaleString()}</td>
                   <td className="px-4 py-3 text-slate-700">{a.callsThisWeek.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-slate-700">{a.customersContacted.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-slate-700">{a.customersBooked.toLocaleString()}</td>
+                  <td className="px-4 py-3">
+                    <Link href={`/admin/customers?ownerId=${a.id}&followupState=contacted`} className="text-blue-600 hover:underline">
+                      {a.customersContacted.toLocaleString()}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Link href={`/admin/customers?ownerId=${a.id}&followupState=contacted&customerType=CUSTOMER`} className="text-blue-600 hover:underline">
+                      {a.customersBooked.toLocaleString()}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
                       {a.conversionRate}%

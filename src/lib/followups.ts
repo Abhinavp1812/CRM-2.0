@@ -573,7 +573,7 @@ export interface AdminCustomerFilter {
   search?: string;
   ownerId?: string;
   customerType?: "NEW_REGISTRATION" | "CUSTOMER" | "all";
-  followupState?: "active" | "closed" | "dnc" | "all";
+  followupState?: "active" | "closed" | "dnc" | "contacted" | "all";
   remark?: string;
 }
 
@@ -597,6 +597,11 @@ export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, p
   } else if (filter.followupState === "active") {
     where.doNotContact = false;
     where.followup = { isNot: null };
+  } else if (filter.followupState === "contacted") {
+    // Matches the "Called" / "Booked" counts on Team Stats exactly: every owned,
+    // non-DNC customer with a followup that's actually been reached at least once.
+    where.doNotContact = false;
+    where.followup = { lastContactedAt: { not: null } };
   }
   if (filter.remark) where.followup = { ...(where.followup as object || {}), currentRemark: filter.remark };
 

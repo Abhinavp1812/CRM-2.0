@@ -39,7 +39,7 @@ export default async function AdminCustomersPage({
     search: params.search || undefined,
     ownerId: params.ownerId || undefined,
     customerType: (params.customerType as "NEW_REGISTRATION" | "CUSTOMER" | "all") || "all",
-    followupState: (params.followupState as "active" | "closed" | "dnc" | "all") || "all",
+    followupState: (params.followupState as "active" | "closed" | "dnc" | "contacted" | "all") || "all",
     remark: params.remark || undefined,
   };
 
@@ -115,6 +115,7 @@ export default async function AdminCustomersPage({
             >
               <option value="all">All states</option>
               <option value="active">Active followup</option>
+              <option value="contacted">Contacted (reached at least once)</option>
               <option value="closed">Closed (no followup)</option>
               <option value="dnc">DNC</option>
             </select>
