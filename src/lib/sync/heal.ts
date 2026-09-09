@@ -66,3 +66,27 @@ export async function createManyChunked<T>(
     await insert(rows.slice(i, i + size));
   }
 }
+
+/**
+ * Read back a large set of rows by key (e.g. "give me the ids for these 15,000
+ * phone numbers") without sending one query with a 15,000-item IN clause -
+ * that single query is slow enough on its own to risk the function timeout.
+ * Splits into chunks and runs a few chunks at a time in parallel.
+ */
+export async function findManyChunked<K, T>(
+  keys: K[],
+  query: (chunk: K[]) => Promise<T[]>,
+  size = 1000,
+  concurrency = 5
+): Promise<T[]> {
+  const chunks: K[][] = [];
+  for (let i = 0; i < keys.length; i += size) chunks.push(keys.slice(i, i + size));
+
+  const results: T[] = [];
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const batch = chunks.slice(i, i + concurrency);
+    const batchResults = await Promise.all(batch.map((c) => query(c)));
+    for (const r of batchResults) results.push(...r);
+  }
+  return results;
+}

@@ -145,7 +145,21 @@ function SyncCard({
     setResult(null);
     try {
       const res = await fetch(`/api/admin/sync/${type}`, { method: "POST" });
-      const data = await res.json();
+      const text = await res.text();
+      let data: SyncResponse & { error?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // The route always returns JSON, even on failure - a non-JSON body means the
+        // function crashed or timed out before it could respond (common on a very
+        // large first sync). The sync is safe to retry: writes commit in chunks, so
+        // whatever went through already is kept and won't be redone.
+        throw new Error(
+          res.status === 504 || !res.ok
+            ? "The sync did not finish in time and the server gave no details. This is usually a timeout on a large first sync - press Sync now again; already-synced rows are skipped automatically."
+            : "Sync returned an unexpected response. Please try again."
+        );
+      }
       if (!res.ok) throw new Error(data.error || "Sync failed");
       setResult(data as SyncResponse);
       router.refresh(); // refresh history + agent breakdown below

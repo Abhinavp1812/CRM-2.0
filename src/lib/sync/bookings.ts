@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString, parseNumber } from "@/lib/normalize";
 import { loadAssignment } from "./assignment";
-import { createManyChunked, healMissingFollowups } from "./heal";
+import { createManyChunked, findManyChunked, healMissingFollowups } from "./heal";
 import type { BookingsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
 
 const FOLLOWUP_DAYS_DEFAULT = 20;
@@ -198,10 +198,14 @@ export async function importBookingRows(
         skipDuplicates: true,
       })
     );
-    const created = await prisma.customer.findMany({
-      where: { phone: { in: Array.from(newCustomers.keys()) } },
-      select: { id: true, phone: true, ownerId: true, customerType: true, doNotContact: true },
-    });
+    const created = await findManyChunked(
+      Array.from(newCustomers.keys()),
+      (chunk) =>
+        prisma.customer.findMany({
+          where: { phone: { in: chunk } },
+          select: { id: true, phone: true, ownerId: true, customerType: true, doNotContact: true },
+        })
+    );
     for (const c of created) customerByPhone.set(c.phone, c);
 
     await createManyChunked(created, (chunk) =>

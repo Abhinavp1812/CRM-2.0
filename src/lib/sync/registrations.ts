@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString } from "@/lib/normalize";
 import { loadAssignment } from "./assignment";
-import { createManyChunked, healMissingFollowups } from "./heal";
+import { createManyChunked, findManyChunked, healMissingFollowups } from "./heal";
 import type { RegistrationsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
 
 /**
@@ -103,7 +103,7 @@ export async function importRegistrationRows(
     else toCreate.push(parsed);
   }
 
-if (toCreate.length > 0) {
+  if (toCreate.length > 0) {
     await createManyChunked(toCreate, (chunk) =>
       prisma.customer.createMany({
         data: chunk.map((p) => ({
@@ -122,40 +122,46 @@ if (toCreate.length > 0) {
       })
     );
 
-    const created = await prisma.customer.findMany({
-      where: { phone: { in: toCreate.map((p) => p.phone) } },
-      select: { id: true, phone: true },
-    });
+    // A single query with 15,000+ phones in an IN clause is slow enough on its
+    // own to risk the function timeout - read it back in parallel chunks instead.
+    const created = await findManyChunked(
+      toCreate.map((p) => p.phone),
+      (chunk) => prisma.customer.findMany({ where: { phone: { in: chunk } }, select: { id: true, phone: true } })
+    );
     const idByPhone = new Map(created.map((c) => [c.phone, c.id]));
     const withId = toCreate.filter((p) => idByPhone.has(p.phone));
 
-    await createManyChunked(withId, (chunk) =>
-      prisma.followup.createMany({
-        data: chunk.map((p) => ({ customerId: idByPhone.get(p.phone)!, nextFollowupDate: today })),
-        skipDuplicates: true,
-      })
-    );
-    await createManyChunked(withId, (chunk) =>
-      prisma.activityLog.createMany({
-        data: chunk.map((p) => ({
-          customerId: idByPhone.get(p.phone)!,
-          userId: ctx.userId,
-          activityType: "CUSTOMER_IMPORTED" as const,
-          note: p.ownerWarning || (p.autoAssigned ? "Registration synced from Google Sheet, auto-assigned" : "Registration synced from Google Sheet"),
-        })),
-      })
-    );
-    await createManyChunked(withId, (chunk) =>
-      prisma.registration.createMany({
-        data: chunk.map((p) => ({
-          customerId: idByPhone.get(p.phone)!,
-          customerIdExt: p.customerIdExt,
-          onboardingDate: p.onboardingDate,
-          rawData: p.raw as never,
-        })),
-        skipDuplicates: true,
-      })
-    );
+    // These three tables are independent of each other - write them concurrently
+    // instead of one after another to cut this step's wall-clock time roughly 3x.
+    await Promise.all([
+      createManyChunked(withId, (chunk) =>
+        prisma.followup.createMany({
+          data: chunk.map((p) => ({ customerId: idByPhone.get(p.phone)!, nextFollowupDate: today })),
+          skipDuplicates: true,
+        })
+      ),
+      createManyChunked(withId, (chunk) =>
+        prisma.activityLog.createMany({
+          data: chunk.map((p) => ({
+            customerId: idByPhone.get(p.phone)!,
+            userId: ctx.userId,
+            activityType: "CUSTOMER_IMPORTED" as const,
+            note: p.ownerWarning || (p.autoAssigned ? "Registration synced from Google Sheet, auto-assigned" : "Registration synced from Google Sheet"),
+          })),
+        })
+      ),
+      createManyChunked(withId, (chunk) =>
+        prisma.registration.createMany({
+          data: chunk.map((p) => ({
+            customerId: idByPhone.get(p.phone)!,
+            customerIdExt: p.customerIdExt,
+            onboardingDate: p.onboardingDate,
+            rawData: p.raw as never,
+          })),
+          skipDuplicates: true,
+        })
+      ),
+    ]);
   }
 
   // Fill blanks on existing customers, in parallel batches
