@@ -33,6 +33,9 @@ A full-stack CRM built for Style Lounge to manage customer follow-ups, bookings,
 - **Safe to re-run** — syncs are idempotent (dedupe by phone and by Order No.), write in chunks of 1,000 rows, and end by giving any customer without a followup date one, so nobody falls out of the agent queues.
 - **Error report download** — after any sync, download a `.xlsx` report of rows that could not be used, with the original data and reason.
 - **Data Sync hub** — per-agent customer breakdown with share bar, and full sync history (last 20 runs).
+- **Bulk followup scheduling** — select customers on the All Customers page and set when they next show up in their agent's queue, in one batch action.
+- **"New" lead badge** — an untouched, recently-scheduled followup is pinned to the top of the list with a New badge until an agent contacts it.
+- **Backup & Restore** — download a full, exact JSON snapshot of every customer, followup, remark, registration, and booking, and restore it back in; separate from the readable Excel export, meant for disaster recovery.
 - **Closed Followups** — view completed/closed follow-ups.
 - **Team Stats** — team-wide performance statistics.
 

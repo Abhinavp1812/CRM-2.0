@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
+export { createManyChunked, findManyChunked } from "@/lib/dbBatch";
+
 /**
  * A customer with no Followup row never shows up in an agent's queue, so it is
  * effectively invisible. That should not happen, but a sync that hits Vercel's
@@ -50,43 +52,4 @@ export async function healMissingFollowups(userId: string, followupDays: number)
 
   const res = await prisma.followup.createMany({ data, skipDuplicates: true });
   return res.count;
-}
-
-/**
- * Split a bulk insert so no single statement carries the whole sheet.
- * Large single createMany calls are the slowest part of a first sync and the
- * most likely thing to blow the function timeout outright.
- */
-export async function createManyChunked<T>(
-  rows: T[],
-  insert: (chunk: T[]) => Promise<unknown>,
-  size = 1000
-): Promise<void> {
-  for (let i = 0; i < rows.length; i += size) {
-    await insert(rows.slice(i, i + size));
-  }
-}
-
-/**
- * Read back a large set of rows by key (e.g. "give me the ids for these 15,000
- * phone numbers") without sending one query with a 15,000-item IN clause -
- * that single query is slow enough on its own to risk the function timeout.
- * Splits into chunks and runs a few chunks at a time in parallel.
- */
-export async function findManyChunked<K, T>(
-  keys: K[],
-  query: (chunk: K[]) => Promise<T[]>,
-  size = 1000,
-  concurrency = 5
-): Promise<T[]> {
-  const chunks: K[][] = [];
-  for (let i = 0; i < keys.length; i += size) chunks.push(keys.slice(i, i + size));
-
-  const results: T[] = [];
-  for (let i = 0; i < chunks.length; i += concurrency) {
-    const batch = chunks.slice(i, i + concurrency);
-    const batchResults = await Promise.all(batch.map((c) => query(c)));
-    for (const r of batchResults) results.push(...r);
-  }
-  return results;
 }

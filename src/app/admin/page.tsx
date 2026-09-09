@@ -8,6 +8,7 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
   ArrowUpTrayIcon,
+  ArrowsRightLeftIcon,
   ClipboardDocumentListIcon,
   QuestionMarkCircleIcon,
 } from "@heroicons/react/24/outline";
@@ -66,6 +67,13 @@ export default async function AdminPage() {
           title="Export All Data"
           description="Download customers, followups, registrations, and bookings as Excel"
           download
+        />
+        <AdminTile
+          href="/admin/backup"
+          icon={ArrowsRightLeftIcon}
+          color="blue"
+          title="Backup & Restore"
+          description="Download a full, exact snapshot of every customer, followup, remark, and booking — and restore it back in, just in case"
         />
         <AdminTile
           href="/admin/help"

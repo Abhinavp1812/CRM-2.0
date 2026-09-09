@@ -468,6 +468,16 @@ These are customers whose scheduled followup date has passed without a call.
 
 ---
 
+### "New" Badge
+
+A followup counts as **New** while it has never been contacted (`lastContactedAt IS NULL`) and its `updatedAt` is within the last 3 days (`NEW_LEAD_DAYS = 3`, capped at the first 20 matches). It shows a blue "New" badge instead of the usual purple "Cold" one, and is pinned to the top of page 1 of the followups list so agents notice it right away.
+
+Because `updatedAt` refreshes whenever a followup's date is set - by a sync, by the admin bulk-scheduling tool on `/admin/customers`, or by a fresh customer's own creation - "New" naturally covers a freshly synced lead and a lead an admin just released to an agent, with no separate schema field needed. The moment an agent logs a call or saves a remark, `lastContactedAt` gets set and the badge disappears immediately, regardless of age.
+
+The pin only affects page 1: a small, capped side query is merged in ahead of the normal results there, and the main paginated query's `skip`/`take` math is completely unchanged, so no other page is affected and nothing is skipped or duplicated.
+
+Implementation: `getTodayFollowups()` in `src/lib/followups.ts`.
+
 ### Stale Threshold
 
 `STALE_THRESHOLD_DAYS = 60`
@@ -871,11 +881,27 @@ Full database view with filters:
 - Filter by customer type (Registered/Customer)
 - Filter by followup state (Active/DNC/No followup)
 
+**Bulk followup-date scheduling:** every row has a checkbox, plus a select-all for the current page. Selecting any customers opens a bar to pick a date and apply it to the whole batch at once - useful for controlling when a batch of leads starts showing up in an agent's queue, instead of every synced customer landing as "due today" at once. Only `nextFollowupDate` changes; remark, note, and contact history are left exactly as they are, so an unworked lead is still unworked (and still eligible for the "New" badge) once its date arrives. DNC customers and customers with no active followup are excluded - those go through Unflag DNC / Reopen instead, which handle the extra reset logic this deliberately doesn't. The write is a single bulk SQL statement (the same `json_array_elements` pattern used elsewhere), so it scales regardless of how many are selected. Selection is per-page only and resets on navigating to another page.
+
+Endpoint: `POST /api/admin/customers/bulk-followup-date`. Implementation: `src/components/AdminCustomersTable.tsx`.
+
 ### Imports (`/admin/imports`)
 
 - Triggering the 3 import flows
 - Viewing agent customer distribution
 - Viewing import history
+
+### Backup & Restore (`/admin/backup`)
+
+A full-fidelity, restorable snapshot - separate from **Export All Data** (a human-readable Excel report that intentionally loses precision: formatted dates, resolved names instead of ids, no activity history). This one is JSON, keeps every field of every customer, followup, activity log entry, registration, and booking, and is meant to be loaded back in "just in case."
+
+**Download Full Backup** (`GET /api/admin/backup/export`) builds the snapshot and streams it gzip-compressed; a browser downloading the link decompresses it automatically, so the saved file is plain readable JSON.
+
+**Restore** reads that file back in. It is a genuine restore, not a gentle merge like the sync: matching rows are OVERWRITTEN with what the file says (by phone for customers, Order No. for bookings, customer for followups), because the whole point is being able to undo drift, not just add to it. Nothing is ever deleted - customers not mentioned in the file are left completely untouched. User accounts are never part of a backup (no passwords); the owner of a customer and the actor on an activity log entry are matched by **email** against whichever users already exist in this database, so a restore never depends on ids from wherever the backup came from.
+
+Every table links to its customer by **phone number** - this app's real identity for a customer everywhere else - rather than a raw database id from the backup file. That is what makes the restore both robust (works whether it's landing in an empty database after a full wipe, or on top of one that's still partly intact) and chunkable: the browser parses the downloaded file itself, then sends it back to the server as a sequence of small requests (config once, then customers in batches, then each of followups/activities/registrations/bookings in batches of 1,500 rows), one phase at a time, so no single request ever has to carry the whole backup - this sidesteps Vercel's request body size limit regardless of how large the database gets. Every phase is its own chunked bulk SQL write, so it's safe to press Restore again if one part fails partway: already-restored rows are reconciled or skipped as duplicates, nothing is redone or undone.
+
+Implementation: `src/lib/backup/` (export.ts, import.ts, types.ts), `src/app/api/admin/backup/`, `src/components/BackupRestorePanel.tsx`.
 
 ---
 
