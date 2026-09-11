@@ -162,18 +162,26 @@ model Salon {
 // FOLLOWUPS — current state per customer (one row per customer)
 // =================================================================
 model Followup {
-  id                String    @id @default(cuid())
-  customerId        String    @unique
-  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  id                String           @id @default(cuid())
+  customerId        String           @unique
+  customer          Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
   nextFollowupDate  DateTime
   currentRemark     String?
   currentNote       String?
+  leadTemperature   LeadTemperature?
   lastContactedAt   DateTime?
   lastContactedById String?
-  updatedAt         DateTime  @updatedAt
+  updatedAt         DateTime         @updatedAt
   updatedById       String?
 
   @@index([nextFollowupDate])
+  @@index([leadTemperature])
+}
+
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
 }
 
 // =================================================================
@@ -187,6 +195,7 @@ model ActivityLog {
   user         User?        @relation(fields: [userId], references: [id])
   activityType ActivityType
   remark       String?
+  leadTemperature LeadTemperature?
   note         String?
   oldValue     String?
   newValue     String?

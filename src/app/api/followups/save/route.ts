@@ -12,6 +12,7 @@ export async function POST(req: Request) {
   let body: {
     customerId?: string;
     remark?: string;
+    leadTemperature?: string;
     note?: string;
     nextFollowupDate?: string; // ISO date string
     flagDnc?: boolean;
@@ -23,13 +24,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { customerId, remark, note, nextFollowupDate, flagDnc, dncReason } = body;
+  const { customerId, remark, leadTemperature, note, nextFollowupDate, flagDnc, dncReason } = body;
   if (!customerId) {
     return NextResponse.json({ error: "Missing customerId" }, { status: 400 });
   }
   if (!remark) {
     return NextResponse.json({ error: "Remark is required" }, { status: 400 });
   }
+  if (leadTemperature !== "HOT" && leadTemperature !== "WARM" && leadTemperature !== "COLD") {
+    return NextResponse.json({ error: "Lead temperature (Hot/Warm/Cold) is required" }, { status: 400 });
+  }
+  const temperature: "HOT" | "WARM" | "COLD" = leadTemperature;
 
   // Load remark option to check rules
   const remarkOption = await prisma.remarkOption.findUnique({
@@ -96,6 +101,7 @@ export async function POST(req: Request) {
           nextFollowupDate: newDate,
           currentRemark: remark,
           currentNote: note || null,
+          leadTemperature: temperature,
           lastContactedAt: now,
           lastContactedById: userId,
           updatedById: userId,
@@ -105,6 +111,7 @@ export async function POST(req: Request) {
           nextFollowupDate: newDate,
           currentRemark: remark,
           currentNote: note || null,
+          leadTemperature: temperature,
           lastContactedAt: now,
           lastContactedById: userId,
           updatedById: userId,
@@ -140,6 +147,7 @@ export async function POST(req: Request) {
         userId,
         activityType: "REMARK_ADDED",
         remark,
+        leadTemperature: temperature,
         note: note || null,
         newValue: newDate ? newDate.toISOString() : null,
       },

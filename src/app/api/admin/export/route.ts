@@ -59,6 +59,7 @@ export async function GET() {
       "Customer Phone": f.customer?.phone || "",
       "Owner": f.customer?.owner?.name || "",
       "Next Followup": new Date(f.nextFollowupDate).toLocaleDateString("en-IN"),
+      "Lead Temperature": f.leadTemperature || "",
       "Current Remark": f.currentRemark || "",
       "Current Note": f.currentNote || "",
       "Last Contacted": f.lastContactedAt ? new Date(f.lastContactedAt).toLocaleDateString("en-IN") : "Never",

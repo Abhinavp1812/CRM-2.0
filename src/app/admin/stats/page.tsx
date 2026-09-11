@@ -16,13 +16,16 @@ export default async function AdminStatsPage() {
     orderBy: { name: "asc" },
   });
 
-  const [totalCustomers, dncCustomers, closedCustomers, activeFollowups, totalBookings, paidBookings] = await Promise.all([
+  const [totalCustomers, dncCustomers, closedCustomers, activeFollowups, totalBookings, paidBookings, hotLeads, warmLeads, coldLeads] = await Promise.all([
     prisma.customer.count({ where: { deletedAt: null } }),
     prisma.customer.count({ where: { deletedAt: null, doNotContact: true } }),
     prisma.customer.count({ where: { deletedAt: null, doNotContact: false, followup: null } }),
     prisma.followup.count({ where: { customer: { deletedAt: null, doNotContact: false } } }),
     prisma.booking.count(),
     prisma.booking.count({ where: { paymentStatus: { in: ["Success", "Partially Paid"] }, NOT: { status: "Cancelled" } } }),
+    prisma.followup.count({ where: { leadTemperature: "HOT", customer: { deletedAt: null, doNotContact: false } } }),
+    prisma.followup.count({ where: { leadTemperature: "WARM", customer: { deletedAt: null, doNotContact: false } } }),
+    prisma.followup.count({ where: { leadTemperature: "COLD", customer: { deletedAt: null, doNotContact: false } } }),
   ]);
 
   const agentStats = await Promise.all(
@@ -81,6 +84,17 @@ export default async function AdminStatsPage() {
         <OverviewStat label="DNC" value={dncCustomers} />
         <OverviewStat label="Total Bookings" value={totalBookings} />
         <OverviewStat label="Paid Bookings" value={paidBookings} />
+      </div>
+
+      {/* Lead temperature section */}
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Lead Temperature</h2>
+        <p className="text-xs text-slate-400">Active followups only - click a card to see who</p>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        <TemperatureStat label="Hot" value={hotLeads} temperature="HOT" color="bg-red-50 border-red-200 text-red-700" />
+        <TemperatureStat label="Warm" value={warmLeads} temperature="WARM" color="bg-amber-50 border-amber-200 text-amber-700" />
+        <TemperatureStat label="Cold" value={coldLeads} temperature="COLD" color="bg-sky-50 border-sky-200 text-sky-700" />
       </div>
 
       {/* Per-agent section */}
@@ -200,5 +214,27 @@ function OverviewStat({ label, value }: { label: string; value: number }) {
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
       <p className="text-xl font-bold mt-1 text-gray-900">{value.toLocaleString()}</p>
     </div>
+  );
+}
+
+function TemperatureStat({
+  label,
+  value,
+  temperature,
+  color,
+}: {
+  label: string;
+  value: number;
+  temperature: "HOT" | "WARM" | "COLD";
+  color: string;
+}) {
+  return (
+    <Link
+      href={`/admin/customers?followupState=active&leadTemperature=${temperature}`}
+      className={"rounded-xl p-4 border shadow-sm block hover:shadow transition-shadow " + color}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label} Leads</p>
+      <p className="text-2xl font-bold mt-1">{value.toLocaleString()}</p>
+    </Link>
   );
 }

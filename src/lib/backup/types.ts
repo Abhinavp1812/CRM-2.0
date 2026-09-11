@@ -82,6 +82,7 @@ export interface BackupFollowup {
   nextFollowupDate: string;
   currentRemark: string | null;
   currentNote: string | null;
+  leadTemperature: "HOT" | "WARM" | "COLD" | null;
   lastContactedAt: string | null;
   lastContactedByEmail: string | null;
   updatedByEmail: string | null;
@@ -93,6 +94,7 @@ export interface BackupActivity {
   userEmail: string | null;
   activityType: string;
   remark: string | null;
+  leadTemperature: "HOT" | "WARM" | "COLD" | null;
   note: string | null;
   oldValue: string | null;
   newValue: string | null;

@@ -28,6 +28,25 @@ export function CustomerTypeBadge({
   );
 }
 
+export function LeadTemperatureBadge({
+  temperature,
+}: {
+  temperature: "HOT" | "WARM" | "COLD" | null;
+}) {
+  if (!temperature) return null;
+  const styles: Record<string, string> = {
+    HOT: "bg-red-100 text-red-700 border-red-200",
+    WARM: "bg-amber-100 text-amber-700 border-amber-200",
+    COLD: "bg-sky-100 text-sky-700 border-sky-200",
+  };
+  const labels: Record<string, string> = { HOT: "Hot", WARM: "Warm", COLD: "Cold" };
+  return (
+    <span className={"inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border " + styles[temperature]}>
+      {labels[temperature]}
+    </span>
+  );
+}
+
 export function FollowupStatusBadge({
   status,
 }: {

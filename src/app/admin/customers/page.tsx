@@ -27,6 +27,7 @@ export default async function AdminCustomersPage({
     customerType?: string;
     followupState?: string;
     remark?: string;
+    leadTemperature?: string;
   }>;
 }) {
   const session = await auth();
@@ -41,6 +42,7 @@ export default async function AdminCustomersPage({
     customerType: (params.customerType as "NEW_REGISTRATION" | "CUSTOMER" | "all") || "all",
     followupState: (params.followupState as "active" | "closed" | "dnc" | "contacted" | "all") || "all",
     remark: params.remark || undefined,
+    leadTemperature: (params.leadTemperature as "HOT" | "WARM" | "COLD") || undefined,
   };
 
   const [{ rows, total }, users, remarkOptions] = await Promise.all([
@@ -58,6 +60,7 @@ export default async function AdminCustomersPage({
       customerType: filter.customerType !== "all" ? filter.customerType : undefined,
       followupState: filter.followupState !== "all" ? filter.followupState : undefined,
       remark: filter.remark,
+      leadTemperature: filter.leadTemperature,
       ...overrides,
     };
     const qs = Object.entries(merged)
@@ -122,12 +125,22 @@ export default async function AdminCustomersPage({
             <select
               name="remark"
               defaultValue={filter.remark || ""}
-              className="border rounded px-2 py-1.5 text-sm md:col-span-2"
+              className="border rounded px-2 py-1.5 text-sm"
             >
               <option value="">Any current remark</option>
               {remarkOptions.map((r) => (
                 <option key={r.label} value={r.label}>{r.label}</option>
               ))}
+            </select>
+            <select
+              name="leadTemperature"
+              defaultValue={filter.leadTemperature || ""}
+              className="border rounded px-2 py-1.5 text-sm"
+            >
+              <option value="">Any temperature</option>
+              <option value="HOT">Hot</option>
+              <option value="WARM">Warm</option>
+              <option value="COLD">Cold</option>
             </select>
             <div className="md:col-span-3 flex gap-2 justify-end">
               <Link
@@ -162,6 +175,7 @@ export default async function AdminCustomersPage({
                 ownerName: c.ownerName,
                 currentRemark: c.currentRemark,
                 currentNote: c.currentNote,
+                leadTemperature: c.leadTemperature,
                 followupText: c.followupDate ? new Date(c.followupDate).toLocaleDateString("en-IN") : "-",
                 lastContactText: c.lastContactedAt ? new Date(c.lastContactedAt).toLocaleDateString("en-IN") : "Never",
                 totalActivities: c.totalActivities,

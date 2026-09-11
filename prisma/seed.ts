@@ -5,29 +5,18 @@ const prisma = new PrismaClient();
 
 // Each remark with its smart-default rules baked in.
 // Day 2C agent UI uses these to enforce the "no customer falls through cracks" rule.
+// Reduced to these 9 remarks (used together with the Hot/Warm/Cold lead-temperature
+// label) - anything not on this list gets deactivated below, never deleted.
 const REMARK_OPTIONS = [
-  { label: "No follow-up",                 defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
-  { label: "Not Interested",               defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
-  { label: "No answer",                    defaultDaysAhead: 2,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Call back",                    defaultDaysAhead: 1,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Invalid Number",               defaultDaysAhead: null, autoFlagDnc: true,  closesFollowup: true  },
-  { label: "Booked",                       defaultDaysAhead: 20,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Service taken",                defaultDaysAhead: 20,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Did not take service",         defaultDaysAhead: 14,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Will take service later",      defaultDaysAhead: 14,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Whatsapp link shared",         defaultDaysAhead: 3,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Number missing",               defaultDaysAhead: null, autoFlagDnc: true,  closesFollowup: true  },
-  { label: "Location issue",               defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Need assistance with booking", defaultDaysAhead: 1,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Pricing Issue",                defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Timing issue",                 defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Salon not listed",             defaultDaysAhead: 14,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Coupon Code not working",      defaultDaysAhead: 1,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Service not listed",           defaultDaysAhead: 14,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Just checking out the app",    defaultDaysAhead: 14,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Will book later",              defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Will Connect Later",           defaultDaysAhead: 3,    autoFlagDnc: false, closesFollowup: false },
-  { label: "Salon misbehave",              defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Potential (Makeup Artist)", defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Potential (Salon)",         defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Callback",                  defaultDaysAhead: 1,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Follow-up",                 defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Booked",                    defaultDaysAhead: 20,   autoFlagDnc: false, closesFollowup: false },
+  { label: "Converted",                 defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
+  { label: "Not Interested",            defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
+  { label: "Not Connected",             defaultDaysAhead: 2,    autoFlagDnc: false, closesFollowup: false },
+  { label: "Location Issue",            defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
 ];
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -68,6 +57,7 @@ async function main() {
         defaultDaysAhead: r.defaultDaysAhead,
         autoFlagDnc: r.autoFlagDnc,
         closesFollowup: r.closesFollowup,
+        isActive: true,
       },
       create: {
         label: r.label,
@@ -78,7 +68,12 @@ async function main() {
       },
     });
   }
-  console.log(`✅ ${REMARK_OPTIONS.length} remark options seeded`);
+  const activeLabels = REMARK_OPTIONS.map((r) => r.label);
+  const { count: deactivatedCount } = await prisma.remarkOption.updateMany({
+    where: { label: { notIn: activeLabels }, isActive: true },
+    data: { isActive: false },
+  });
+  console.log(`✅ ${REMARK_OPTIONS.length} remark options seeded (${deactivatedCount} old ones deactivated)`);
 
   // Settings
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {

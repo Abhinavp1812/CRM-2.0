@@ -198,6 +198,7 @@ export async function restoreLinkedTable(
         return {
           id: randomUUID(), customerId,
           nextFollowupDate: f.nextFollowupDate, currentRemark: f.currentRemark, currentNote: f.currentNote,
+          leadTemperature: f.leadTemperature,
           lastContactedAt: f.lastContactedAt,
           lastContactedById: resolveUser(f.lastContactedByEmail), updatedById: resolveUser(f.updatedByEmail),
         };
@@ -208,15 +209,17 @@ export async function restoreLinkedTable(
       const chunk = insertRows.slice(i, i + CHUNK);
       await prisma.$executeRaw`
         INSERT INTO "Followup"
-          (id, "customerId", "nextFollowupDate", "currentRemark", "currentNote", "lastContactedAt", "lastContactedById", "updatedAt", "updatedById")
+          (id, "customerId", "nextFollowupDate", "currentRemark", "currentNote", "leadTemperature", "lastContactedAt", "lastContactedById", "updatedAt", "updatedById")
         SELECT
           v->>'id', v->>'customerId', (v->>'nextFollowupDate')::timestamptz, v->>'currentRemark', v->>'currentNote',
+          (v->>'leadTemperature')::"LeadTemperature",
           (v->>'lastContactedAt')::timestamptz, v->>'lastContactedById', NOW(), v->>'updatedById'
         FROM json_array_elements(${JSON.stringify(chunk)}::json) AS v
         ON CONFLICT ("customerId") DO UPDATE SET
           "nextFollowupDate" = EXCLUDED."nextFollowupDate",
           "currentRemark" = EXCLUDED."currentRemark",
           "currentNote" = EXCLUDED."currentNote",
+          "leadTemperature" = EXCLUDED."leadTemperature",
           "lastContactedAt" = EXCLUDED."lastContactedAt",
           "lastContactedById" = EXCLUDED."lastContactedById",
           "updatedAt" = NOW(),
@@ -238,7 +241,7 @@ export async function restoreLinkedTable(
         return {
           id: a.id, customerId, userId: resolveUser(a.userEmail),
           activityType: a.activityType as ActivityType,
-          remark: a.remark, note: a.note, oldValue: a.oldValue, newValue: a.newValue,
+          remark: a.remark, leadTemperature: a.leadTemperature, note: a.note, oldValue: a.oldValue, newValue: a.newValue,
           createdAt: new Date(a.createdAt),
         };
       })

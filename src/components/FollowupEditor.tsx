@@ -9,11 +9,14 @@ interface RemarkOption {
   closesFollowup: boolean;
 }
 
+type LeadTemperature = "HOT" | "WARM" | "COLD";
+
 interface Props {
   customerId: string;
   customerName: string | null;
   currentRemark: string | null;
   currentNote: string | null;
+  currentLeadTemperature?: LeadTemperature | null;
   currentFollowupDate: string; // YYYY-MM-DD
   remarkOptions: RemarkOption[];
   onClose?: () => void;
@@ -24,12 +27,14 @@ export default function FollowupEditor({
   customerName,
   currentRemark,
   currentNote,
+  currentLeadTemperature,
   currentFollowupDate,
   remarkOptions,
   onClose,
 }: Props) {
   const router = useRouter();
   const [remark, setRemark] = useState(currentRemark || "");
+  const [leadTemperature, setLeadTemperature] = useState<LeadTemperature | "">(currentLeadTemperature || "");
   const [note, setNote] = useState(currentNote || "");
   function toLocalIsoFromAny(input: string) {
     try {
@@ -81,6 +86,10 @@ export default function FollowupEditor({
 
   async function handleSave() {
     setError("");
+    if (!leadTemperature) {
+      setError("Pick a lead temperature (Hot/Warm/Cold) first.");
+      return;
+    }
     if (!remark) {
       setError("Pick a remark first.");
       return;
@@ -101,6 +110,7 @@ export default function FollowupEditor({
         body: JSON.stringify({
           customerId,
           remark,
+          leadTemperature,
           note: note || undefined,
           nextFollowupDate:
             !effectiveDnc && !isCloser && nextDate ? nextDate : undefined,
@@ -154,6 +164,34 @@ export default function FollowupEditor({
       ) : null}
 
       <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
+            Lead Temperature <span className="text-red-500">*</span>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                { value: "HOT", label: "Hot", active: "bg-red-600 text-white border-red-600", inactive: "bg-white text-red-700 border-red-200 hover:bg-red-50" },
+                { value: "WARM", label: "Warm", active: "bg-amber-500 text-white border-amber-500", inactive: "bg-white text-amber-700 border-amber-200 hover:bg-amber-50" },
+                { value: "COLD", label: "Cold", active: "bg-sky-600 text-white border-sky-600", inactive: "bg-white text-sky-700 border-sky-200 hover:bg-sky-50" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setLeadTemperature(t.value)}
+                disabled={saving}
+                className={
+                  "px-3 py-2 rounded-lg text-sm font-semibold border transition-colors " +
+                  (leadTemperature === t.value ? t.active : t.inactive)
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div>
           <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
             Remark <span className="text-red-500">*</span>
@@ -259,7 +297,7 @@ export default function FollowupEditor({
           ) : null}
           <button
             onClick={handleSave}
-            disabled={saving || !remark}
+            disabled={saving || !remark || !leadTemperature}
             className="px-5 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save"}

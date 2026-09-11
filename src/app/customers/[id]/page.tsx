@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { formatPhone, whatsappLink, telLink, getActiveRemarkOptions } from "@/lib/followups";
-import { CustomerTypeBadge } from "@/components/StatusBadge";
+import { CustomerTypeBadge, LeadTemperatureBadge } from "@/components/StatusBadge";
 import TopNav from "@/components/TopNav";
 import FollowupEditButton from "@/components/FollowupEditButton";
 import LogCallButton from "@/components/LogCallButton";
@@ -92,6 +92,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 <div className="flex items-center gap-3 flex-wrap mb-1">
                   <h1 className="text-xl md:text-2xl font-bold text-gray-900">{customer.name || "(no name)"}</h1>
                   <CustomerTypeBadge type={customer.customerType} doNotContact={customer.doNotContact} />
+                  <LeadTemperatureBadge temperature={customer.followup?.leadTemperature || null} />
                 </div>
                 <p className="text-sm text-slate-600">
                   <span className="font-mono">{formatPhone(customer.phone)}</span>
@@ -127,6 +128,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                       customerName={customer.name}
                       currentRemark={customer.followup?.currentRemark || null}
                       currentNote={customer.followup?.currentNote || null}
+                      currentLeadTemperature={customer.followup?.leadTemperature || null}
                       currentFollowupDate={followupIso}
                       remarkOptions={remarkOptions}
                     />

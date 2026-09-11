@@ -11,7 +11,7 @@ import {
   type FollowupFilter,
   type BookingFlavor,
 } from "@/lib/followups";
-import { CustomerTypeBadge, FollowupStatusBadge } from "@/components/StatusBadge";
+import { CustomerTypeBadge, FollowupStatusBadge, LeadTemperatureBadge } from "@/components/StatusBadge";
 import Layout from "@/components/Layout";
 import FollowupEditButton from "@/components/FollowupEditButton";
 import SearchBar from "@/components/SearchBar";
@@ -272,6 +272,7 @@ function FollowupRow({
           {f.isStale && (
             <span className="inline-block px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full font-medium">Stale</span>
           )}
+          <LeadTemperatureBadge temperature={f.leadTemperature} />
           {f.currentRemark && <span className="text-xs text-slate-400">{f.currentRemark}</span>}
         </div>
       </td>
@@ -297,6 +298,7 @@ function FollowupRow({
             customerName={f.customerName}
             currentRemark={f.currentRemark}
             currentNote={f.currentNote}
+            currentLeadTemperature={f.leadTemperature}
             currentFollowupDate={followupIso}
             remarkOptions={remarkOptions}
           />
@@ -342,6 +344,7 @@ function FollowupCard({
         {f.isStale && (
           <span className="inline-block px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full font-medium">Stale</span>
         )}
+        <LeadTemperatureBadge temperature={f.leadTemperature} />
       </div>
 
       {/* Name + remark */}
@@ -377,6 +380,7 @@ function FollowupCard({
           customerName={f.customerName}
           currentRemark={f.currentRemark}
           currentNote={f.currentNote}
+          currentLeadTemperature={f.leadTemperature}
           currentFollowupDate={followupIso}
           remarkOptions={remarkOptions}
         />

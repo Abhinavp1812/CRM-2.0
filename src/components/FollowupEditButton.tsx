@@ -14,6 +14,7 @@ interface Props {
   customerName: string | null;
   currentRemark: string | null;
   currentNote: string | null;
+  currentLeadTemperature?: "HOT" | "WARM" | "COLD" | null;
   currentFollowupDate: string;
   remarkOptions: RemarkOption[];
 }

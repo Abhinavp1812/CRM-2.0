@@ -27,6 +27,7 @@ export interface FollowupRow {
   effectiveFollowupDate: Date;
   currentRemark: string | null;
   currentNote: string | null;
+  leadTemperature: "HOT" | "WARM" | "COLD" | null;
   lastContactedAt: Date | null;
   lastBookingDate: Date | null;
   lastBookingSalon: string | null;
@@ -507,6 +508,7 @@ export async function getTodayFollowups(
       effectiveFollowupDate,
       currentRemark: f.currentRemark,
       currentNote: f.currentNote,
+      leadTemperature: f.leadTemperature,
       lastContactedAt: f.lastContactedAt,
       lastBookingDate: lastBooking?.bookingDate || null,
       lastBookingSalon: lastBooking?.salon?.name || lastBooking?.salonNameSnapshot || null,
@@ -563,6 +565,7 @@ export interface AdminCustomerRow {
   followupDate: Date | null;
   currentRemark: string | null;
   currentNote: string | null;
+  leadTemperature: "HOT" | "WARM" | "COLD" | null;
   lastContactedAt: Date | null;
   totalActivities: number;
   lastActivityDate: Date | null;
@@ -575,6 +578,7 @@ export interface AdminCustomerFilter {
   customerType?: "NEW_REGISTRATION" | "CUSTOMER" | "all";
   followupState?: "active" | "closed" | "dnc" | "contacted" | "all";
   remark?: string;
+  leadTemperature?: "HOT" | "WARM" | "COLD";
 }
 
 export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, pageSize = 50) {
@@ -604,13 +608,14 @@ export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, p
     where.followup = { lastContactedAt: { not: null } };
   }
   if (filter.remark) where.followup = { ...(where.followup as object || {}), currentRemark: filter.remark };
+  if (filter.leadTemperature) where.followup = { ...(where.followup as object || {}), leadTemperature: filter.leadTemperature };
 
   const [customers, total] = await Promise.all([
     prisma.customer.findMany({
       where,
       include: {
         owner: { select: { name: true } },
-        followup: { select: { nextFollowupDate: true, currentRemark: true, currentNote: true, lastContactedAt: true } },
+        followup: { select: { nextFollowupDate: true, currentRemark: true, currentNote: true, leadTemperature: true, lastContactedAt: true } },
         _count: { select: { activities: true } },
         activities: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
       },
@@ -627,6 +632,7 @@ export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, p
     followupDate: c.followup?.nextFollowupDate || null,
     currentRemark: c.followup?.currentRemark || null,
     currentNote: c.followup?.currentNote || null,
+    leadTemperature: c.followup?.leadTemperature || null,
     lastContactedAt: c.followup?.lastContactedAt || null,
     totalActivities: c._count.activities,
     lastActivityDate: c.activities[0]?.createdAt || null,
