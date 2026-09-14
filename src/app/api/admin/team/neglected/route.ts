@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -9,9 +10,8 @@ export async function POST(req: Request) {
   const { dayThreshold, destinationId, roundRobin, preview } = await req.json();
   if (!dayThreshold || dayThreshold < 1) return NextResponse.json({ error: "Invalid dayThreshold" }, { status: 400 });
 
-  const cutoff = new Date();
+  const cutoff = startOfTodayIST();
   cutoff.setDate(cutoff.getDate() - dayThreshold);
-  cutoff.setHours(0, 0, 0, 0);
 
   // Neglected = followup date is overdue by threshold AND never contacted OR last contact is also past threshold
   const neglected = await prisma.customer.findMany({

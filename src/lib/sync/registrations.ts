@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString } from "@/lib/normalize";
+import { startOfTodayIST } from "@/lib/formatDate";
 import { loadAssignment } from "./assignment";
 import { createManyChunked, findManyChunked, healMissingFollowups } from "./heal";
 import type { RegistrationsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
@@ -30,8 +31,7 @@ export async function importRegistrationRows(
   });
   const customerByPhone = new Map(existingCustomers.map((c) => [c.phone, c]));
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayIST();
 
   type Parsed = {
     phone: string;

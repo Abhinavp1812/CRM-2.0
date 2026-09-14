@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,7 @@ export default async function MyStatsPage() {
   if (session.user.role === "ADMIN") redirect("/admin/stats");
 
   const userId = session.user.id;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const weekAgo = new Date(today);

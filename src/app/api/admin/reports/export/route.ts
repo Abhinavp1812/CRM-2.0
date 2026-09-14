@@ -1,15 +1,9 @@
 import { auth } from "@/auth";
 import * as XLSX from "xlsx";
 import { getAgentPeriodStats, getRemarkActivity } from "@/lib/followups";
-import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
+import { formatDateIN, formatTimeIN, startOfTodayIST } from "@/lib/formatDate";
 
 export const maxDuration = 60;
-
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -20,7 +14,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const period = searchParams.get("period") === "month" ? "month" : "week";
 
-  const today = startOfDay(new Date());
+  const today = startOfTodayIST();
   const end = new Date(today);
   end.setDate(end.getDate() + 1); // exclusive upper bound, includes all of today
   const start = new Date(today);

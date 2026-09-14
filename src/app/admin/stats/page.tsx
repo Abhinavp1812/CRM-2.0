@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function AdminStatsPage() {
 
   const agentStats = await Promise.all(
     agents.map(async (a) => {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const today = startOfTodayIST();
       const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
       const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
 

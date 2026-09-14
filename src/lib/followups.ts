@@ -1,4 +1,5 @@
 ﻿import { prisma } from "@/lib/prisma";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 const STALE_THRESHOLD_DAYS = 60;
 const NEW_BOOKING_DAYS = 20;
@@ -70,7 +71,7 @@ function startOfDay(d: Date): Date {
 }
 
 function getDateMarkers() {
-  const today = startOfDay(new Date());
+  const today = startOfTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const staleCutoff = new Date(today);

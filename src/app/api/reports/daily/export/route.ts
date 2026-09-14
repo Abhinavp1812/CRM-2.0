@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import * as XLSX from "xlsx";
 import { getRemarkActivity } from "@/lib/followups";
-import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
+import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
 
 export const maxDuration = 30;
 
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const dateParam = searchParams.get("date");
-  const dateStr = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : new Date().toISOString().slice(0, 10);
+  const dateStr = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayIsoIST();
   const [y, m, d] = dateStr.split("-").map(Number);
   const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0);
   const dayEnd = new Date(dayStart);

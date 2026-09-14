@@ -3,6 +3,7 @@ import { getField } from "@/lib/parseFile";
 import { normalizePhone, parseFlexibleDate, cleanString, parseNumber } from "@/lib/normalize";
 import { loadAssignment } from "./assignment";
 import { createManyChunked, findManyChunked, healMissingFollowups } from "./heal";
+import { startOfTodayIST } from "@/lib/formatDate";
 import type { BookingsSyncResult, SourceRow, SyncContext, SyncError } from "./types";
 
 const FOLLOWUP_DAYS_DEFAULT = 20;
@@ -330,8 +331,7 @@ export async function importBookingRows(
       if (!prev || b.bookingDate.getTime() > prev.getTime()) overallMax.set(b.customerId, b.bookingDate);
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfTodayIST();
 
     const creates: { customerId: string; nextFollowupDate: Date; updatedById: string }[] = [];
     const updates: { cid: string; finalDate: Date }[] = [];

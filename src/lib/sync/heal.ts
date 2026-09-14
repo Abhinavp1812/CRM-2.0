@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 export { createManyChunked, findManyChunked } from "@/lib/dbBatch";
 
@@ -35,8 +36,7 @@ export async function healMissingFollowups(userId: string, followupDays: number)
     if (!prev || b.bookingDate.getTime() > prev.getTime()) latestByCustomer.set(b.customerId, b.bookingDate);
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayIST();
 
   const data = ids.map((id) => {
     const latest = latestByCustomer.get(id);

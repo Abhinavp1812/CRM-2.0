@@ -4,17 +4,9 @@ import Link from "next/link";
 import Layout from "@/components/Layout";
 import { getRemarkActivity, getAllUsersForFilter } from "@/lib/followups";
 import { LeadTemperatureBadge } from "@/components/StatusBadge";
-import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
+import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
-
-function todayLocalIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
 
 export default async function DailyReportPage({
   searchParams,
@@ -26,7 +18,7 @@ export default async function DailyReportPage({
   const isAdmin = session.user.role === "ADMIN";
 
   const params = await searchParams;
-  const dateStr = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayLocalIso();
+  const dateStr = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayIsoIST();
   const [y, m, d] = dateStr.split("-").map(Number);
   const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0);
   const dayEnd = new Date(dayStart);
@@ -60,7 +52,7 @@ export default async function DailyReportPage({
             type="date"
             name="date"
             defaultValue={dateStr}
-            max={todayLocalIso()}
+            max={todayIsoIST()}
             className="border rounded px-2 py-1.5 text-sm"
           />
         </div>

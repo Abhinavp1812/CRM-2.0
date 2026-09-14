@@ -1,6 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { startOfTodayIST } from "@/lib/formatDate";
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -27,8 +28,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Customer not found" }, { status: 404 });
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfTodayIST();
 
   await prisma.$transaction(async (tx) => {
     // Clear DNC if requested or if customer is DNC
