@@ -49,14 +49,20 @@ export default async function AdminStatsPage() {
             currentRemark: { not: null },
           },
         }),
-        // Conversion: every owned customer this agent has ever reached (lifetime,
+        // Conversion: every owned customer this agent has EVER reached (lifetime,
         // not time-boxed - "these customers"), and of those, how many are now a
         // paying customer (customerType flips to CUSTOMER on their first booking).
+        // Read straight from the activity log, not Followup.lastContactedAt - that
+        // column disappears the moment a remark closes the followup (Not
+        // Interested, Converted, DNC, ...) and deletes the Followup row, which
+        // was silently undercounting every agent's real contacted total. Not
+        // restricted to doNotContact: false either, for the same reason: a
+        // customer contacted and only later flagged DNC was still really reached.
         prisma.customer.count({
-          where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { lastContactedAt: { not: null } } },
+          where: { ownerId: a.id, deletedAt: null, activities: { some: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] } } } },
         }),
         prisma.customer.count({
-          where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { lastContactedAt: { not: null } }, customerType: "CUSTOMER" },
+          where: { ownerId: a.id, deletedAt: null, customerType: "CUSTOMER", activities: { some: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] } } } },
         }),
       ]);
 

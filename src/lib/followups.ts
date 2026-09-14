@@ -697,11 +697,14 @@ export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, p
       where.doNotContact = false;
       requireFollowup = true;
     } else if (filter.followupState === "contacted") {
-      // Matches the "Called" / "Booked" counts on Team Stats exactly: every owned,
-      // non-DNC customer with a followup that's actually been reached at least once.
-      where.doNotContact = false;
-      followupScalar.lastContactedAt = { not: null };
-      requireFollowup = true;
+      // Lifetime, matches the "Called" / "Booked" counts on Team Stats exactly:
+      // every customer this agent has EVER actually reached, read straight from
+      // the activity log - not Followup.lastContactedAt, which disappears the
+      // moment a remark closes the followup (Not Interested, Converted, DNC, ...)
+      // and deletes the Followup row entirely. Deliberately not restricted to
+      // doNotContact: false either, for the same reason: a customer who was
+      // contacted and only later went DNC was still genuinely reached.
+      where.activities = { some: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] } } };
     }
     if (filter.remark) { followupScalar.currentRemark = filter.remark; requireFollowup = true; }
     if (filter.leadTemperature) { followupScalar.leadTemperature = filter.leadTemperature; requireFollowup = true; }
