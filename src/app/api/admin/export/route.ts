@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import * as XLSX from "xlsx";
+import { formatDateIN } from "@/lib/formatDate";
 
 export const maxDuration = 60;
 
@@ -48,7 +49,7 @@ export async function GET() {
       "DNC Reason": c.doNotContactReason || "",
       "External ID": c.customerIdExt || "",
       "Pending Owner": c.pendingOwnerName || "",
-      "Created At": c.createdAt.toLocaleDateString("en-IN"),
+      "Created At": formatDateIN(c.createdAt),
     }))
   ), "Customers");
 
@@ -58,11 +59,11 @@ export async function GET() {
       "Customer Name": f.customer?.name || "",
       "Customer Phone": f.customer?.phone || "",
       "Owner": f.customer?.owner?.name || "",
-      "Next Followup": new Date(f.nextFollowupDate).toLocaleDateString("en-IN"),
+      "Next Followup": formatDateIN(f.nextFollowupDate),
       "Lead Temperature": f.leadTemperature || "",
       "Current Remark": f.currentRemark || "",
       "Current Note": f.currentNote || "",
-      "Last Contacted": f.lastContactedAt ? new Date(f.lastContactedAt).toLocaleDateString("en-IN") : "Never",
+      "Last Contacted": f.lastContactedAt ? formatDateIN(f.lastContactedAt) : "Never",
     }))
   ), "Followups");
 
@@ -72,8 +73,8 @@ export async function GET() {
       "Customer Name": r.customer?.name || "",
       "Customer Phone": r.customer?.phone || "",
       "External ID": r.customerIdExt || "",
-      "Onboarding Date": r.onboardingDate ? new Date(r.onboardingDate).toLocaleDateString("en-IN") : "",
-      "Imported At": new Date(r.createdAt).toLocaleDateString("en-IN"),
+      "Onboarding Date": r.onboardingDate ? formatDateIN(r.onboardingDate) : "",
+      "Imported At": formatDateIN(r.createdAt),
     }))
   ), "Registrations");
 
@@ -83,7 +84,7 @@ export async function GET() {
       "Customer Name": b.customer?.name || "",
       "Customer Phone": b.customer?.phone || "",
       "Order No": b.orderNo || "",
-      "Booking Date": b.bookingDate ? new Date(b.bookingDate).toLocaleDateString("en-IN") : "",
+      "Booking Date": b.bookingDate ? formatDateIN(b.bookingDate) : "",
       "Salon": b.salon?.name || b.salonNameSnapshot || "",
       "City": b.salon?.city || b.city || "",
       "Status": b.status || "",

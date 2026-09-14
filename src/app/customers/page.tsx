@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
 import Link from "next/link";
+import { formatDateIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +106,7 @@ export default async function CustomersPage({
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-700">
-                    {c.followup?.nextFollowupDate ? new Date(c.followup.nextFollowupDate).toLocaleDateString("en-IN") : "-"}
+                    {c.followup?.nextFollowupDate ? formatDateIN(c.followup.nextFollowupDate) : "-"}
                   </td>
                   <td className="px-4 py-3">
                     <Link href={"/customers/" + c.id} className="text-blue-600 hover:underline text-xs">Open</Link>

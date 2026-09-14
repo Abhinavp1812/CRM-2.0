@@ -5,6 +5,7 @@ import Layout from "@/components/Layout";
 import SyncPanel from "@/components/SyncPanel";
 import { prisma } from "@/lib/prisma";
 import { getSyncStatus } from "@/lib/sync/run";
+import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -120,9 +121,9 @@ export default async function DataSyncHub() {
               ) : recentSyncs.map((imp) => (
                 <tr key={imp.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                    {imp.createdAt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    {formatDateIN(imp.createdAt, { day: "2-digit", month: "short", year: "numeric" })}
                     <div className="text-xs text-gray-400">
-                      {imp.createdAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                      {formatTimeIN(imp.createdAt, { hour: "2-digit", minute: "2-digit" })}
                     </div>
                   </td>
                   <td className="px-4 py-3">

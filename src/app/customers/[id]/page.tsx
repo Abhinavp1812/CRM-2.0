@@ -10,6 +10,7 @@ import LogCallButton from "@/components/LogCallButton";
 import UnflagDncButton from "@/components/UnflagDncButton";
 import Tabs from "@/components/Tabs";
 import ReassignCustomerButton from "@/components/ReassignCustomerButton";
+import { formatDateIN, formatDateTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                   <p className="font-semibold text-red-900">Do Not Contact</p>
                   <p className="text-sm text-red-700 mt-1">{customer.doNotContactReason || "(no reason given)"}</p>
                   <p className="text-xs text-red-500 mt-1">
-                    Flagged {customer.doNotContactSetAt ? new Date(customer.doNotContactSetAt).toLocaleDateString("en-IN") : ""}
+                    Flagged {customer.doNotContactSetAt ? formatDateIN(customer.doNotContactSetAt) : ""}
                   </p>
                 </div>
                 {isAdmin && <UnflagDncButton customerId={customer.id} />}
@@ -140,8 +141,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
           {/* Stats row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <Stat label="Next followup" value={customer.followup ? new Date(customer.followup.nextFollowupDate).toLocaleDateString("en-IN") : "—"} />
-            <Stat label="Last contact" value={customer.followup?.lastContactedAt ? new Date(customer.followup.lastContactedAt).toLocaleDateString("en-IN") : "Never"} />
+            <Stat label="Next followup" value={customer.followup ? formatDateIN(customer.followup.nextFollowupDate) : "—"} />
+            <Stat label="Last contact" value={customer.followup?.lastContactedAt ? formatDateIN(customer.followup.lastContactedAt) : "Never"} />
             <Stat label="Bookings" value={customer.bookings.length.toString()} />
             <Stat label="Lifetime spend" value={totalSpend > 0 ? "₹" + Math.round(totalSpend).toLocaleString("en-IN") : "—"} />
           </div>
@@ -165,7 +166,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Most recent booking</p>
               <p className="text-sm font-semibold text-gray-900">
                 {lastBooking.salon?.name || lastBooking.salonNameSnapshot || "Unknown salon"}
-                {lastBooking.bookingDate && <span className="font-normal text-slate-500"> · {new Date(lastBooking.bookingDate).toLocaleDateString("en-IN")}</span>}
+                {lastBooking.bookingDate && <span className="font-normal text-slate-500"> · {formatDateIN(lastBooking.bookingDate)}</span>}
               </p>
               <p className="text-xs text-slate-500 mt-1">
                 Order #{lastBooking.orderNo} · {lastBooking.status || "?"} · {lastBooking.paymentStatus || "?"}
@@ -216,8 +217,8 @@ function activityLabel(a: Activity): string {
     case "REMARK_ADDED": return "Remark: " + (a.remark || "");
     case "NOTE_ADDED": return "Note added";
     case "FOLLOWUP_DATE_CHANGED": {
-      const oldD = a.oldValue ? new Date(a.oldValue).toLocaleDateString("en-IN") : "-";
-      const newD = a.newValue ? new Date(a.newValue).toLocaleDateString("en-IN") : "-";
+      const oldD = a.oldValue ? formatDateIN(a.oldValue) : "-";
+      const newD = a.newValue ? formatDateIN(a.newValue) : "-";
       return "Follow-up moved: " + oldD + " → " + newD;
     }
     case "OWNER_CHANGED": return "Owner: " + (a.oldValue || "-") + " → " + (a.newValue || "-");
@@ -245,7 +246,7 @@ function Timeline({ activities }: { activities: Activity[] }) {
             <p className="text-sm font-medium text-gray-900">{activityLabel(a)}</p>
             {a.note && <p className="text-sm text-slate-500 mt-0.5">{a.note}</p>}
             <p className="text-xs text-slate-400 mt-1">
-              {new Date(a.createdAt).toLocaleString("en-IN")}
+              {formatDateTimeIN(a.createdAt)}
               {a.user?.name && <span> · {a.user.name}</span>}
             </p>
           </div>
@@ -284,7 +285,7 @@ function BookingsTable({ bookings }: { bookings: Booking[] }) {
         <tbody className="divide-y divide-gray-100">
           {bookings.map((b) => (
             <tr key={b.id} className="hover:bg-slate-50 transition-colors">
-              <td className="px-3 py-2 text-slate-600">{b.bookingDate ? new Date(b.bookingDate).toLocaleDateString("en-IN") : "-"}</td>
+              <td className="px-3 py-2 text-slate-600">{b.bookingDate ? formatDateIN(b.bookingDate) : "-"}</td>
               <td className="px-3 py-2">
                 <span className="font-medium text-gray-900">{b.salon?.name || b.salonNameSnapshot || "-"}</span>
                 {b.salon?.city && <span className="text-slate-400 text-xs ml-1">· {b.salon.city}</span>}
@@ -325,9 +326,9 @@ function RegistrationsTable({ registrations }: { registrations: Registration[] }
         <tbody className="divide-y divide-gray-100">
           {registrations.map((r) => (
             <tr key={r.id} className="hover:bg-slate-50 transition-colors">
-              <td className="px-3 py-2 text-slate-600">{r.onboardingDate ? new Date(r.onboardingDate).toLocaleDateString("en-IN") : "-"}</td>
+              <td className="px-3 py-2 text-slate-600">{r.onboardingDate ? formatDateIN(r.onboardingDate) : "-"}</td>
               <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.customerIdExt || "-"}</td>
-              <td className="px-3 py-2 text-slate-500">{new Date(r.createdAt).toLocaleDateString("en-IN")}</td>
+              <td className="px-3 py-2 text-slate-500">{formatDateIN(r.createdAt)}</td>
             </tr>
           ))}
         </tbody>

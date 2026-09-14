@@ -16,6 +16,7 @@ import Layout from "@/components/Layout";
 import FollowupEditButton from "@/components/FollowupEditButton";
 import SearchBar from "@/components/SearchBar";
 import Link from "next/link";
+import { formatDateIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -244,10 +245,10 @@ function FollowupRow({
   remarkOptions: RemarkOption[];
   showOwner: boolean;
 }) {
-  const lastBookingText = f.lastBookingDate ? new Date(f.lastBookingDate).toLocaleDateString("en-IN") : "-";
-  const registeredText = f.registeredAt ? new Date(f.registeredAt).toLocaleDateString("en-IN") : "-";
-  const lastContactText = f.lastContactedAt ? new Date(f.lastContactedAt).toLocaleDateString("en-IN") : "Never";
-  const followupText = new Date(f.effectiveFollowupDate).toLocaleDateString("en-IN");
+  const lastBookingText = f.lastBookingDate ? formatDateIN(f.lastBookingDate) : "-";
+  const registeredText = f.registeredAt ? formatDateIN(f.registeredAt) : "-";
+  const lastContactText = f.lastContactedAt ? formatDateIN(f.lastContactedAt) : "Never";
+  const followupText = formatDateIN(f.effectiveFollowupDate);
   const followupIso = toLocalIso(new Date(f.nextFollowupDate));
   const waMessage = "Hi " + (f.customerName ?? "") + ", this is from Style Lounge.";
 
@@ -321,8 +322,8 @@ function FollowupCard({
   showOwner: boolean;
 }) {
   const followupIso = toLocalIso(new Date(f.nextFollowupDate));
-  const followupText = new Date(f.effectiveFollowupDate).toLocaleDateString("en-IN");
-  const lastContactText = f.lastContactedAt ? new Date(f.lastContactedAt).toLocaleDateString("en-IN") : "Never";
+  const followupText = formatDateIN(f.effectiveFollowupDate);
+  const lastContactText = f.lastContactedAt ? formatDateIN(f.lastContactedAt) : "Never";
   const waMessage = "Hi " + (f.customerName ?? "") + ", this is from Style Lounge.";
 
   return (
@@ -362,7 +363,7 @@ function FollowupCard({
         <span className="font-mono">{formatPhone(f.phone)}</span>
         {f.city && <span>{f.city}</span>}
         {showOwner && f.ownerName && <span>Owner: <strong className="text-slate-700">{f.ownerName}</strong></span>}
-        {f.registeredAt && <span>Registered: {new Date(f.registeredAt).toLocaleDateString("en-IN")}</span>}
+        {f.registeredAt && <span>Registered: {formatDateIN(f.registeredAt)}</span>}
         <span>Followup: <strong className="text-slate-700">{followupText}</strong></span>
         <span>Last contact: {lastContactText}</span>
       </div>

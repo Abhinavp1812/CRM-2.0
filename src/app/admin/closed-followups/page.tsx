@@ -5,6 +5,7 @@ import { getClosedCustomers, getClosureReasons, formatPhone } from "@/lib/follow
 import { CustomerTypeBadge } from "@/components/StatusBadge";
 import Layout from "@/components/Layout";
 import ReopenFollowupButton from "@/components/ReopenFollowupButton";
+import { formatDateIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +90,7 @@ export default async function ClosedFollowupsPage({
                       {c.city && <span>{c.city}</span>}
                       {c.ownerName && <span>Owner: {c.ownerName}</span>}
                       <span className={c.doNotContact ? "text-red-600 font-medium" : ""}>{c.closedReason}</span>
-                      {c.closedAt && <span>Closed {new Date(c.closedAt).toLocaleDateString("en-IN")}</span>}
+                      {c.closedAt && <span>Closed {formatDateIN(c.closedAt)}</span>}
                     </div>
                     <div className="flex gap-2">
                       <ReopenFollowupButton customerId={c.id} customerName={c.name} isDnc={c.doNotContact} />
@@ -134,7 +135,7 @@ export default async function ClosedFollowupsPage({
                           </span>
                         </td>
                         <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                          {c.closedAt ? new Date(c.closedAt).toLocaleDateString("en-IN") : "-"}
+                          {c.closedAt ? formatDateIN(c.closedAt) : "-"}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">

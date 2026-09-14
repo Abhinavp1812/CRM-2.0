@@ -12,6 +12,7 @@ import {
 } from "@/lib/followups";
 import Layout from "@/components/Layout";
 import AdminCustomersTable, { type AdminCustomerClientRow } from "@/components/AdminCustomersTable";
+import { formatDateIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -176,10 +177,10 @@ export default async function AdminCustomersPage({
                 currentRemark: c.currentRemark,
                 currentNote: c.currentNote,
                 leadTemperature: c.leadTemperature,
-                followupText: c.followupDate ? new Date(c.followupDate).toLocaleDateString("en-IN") : "-",
-                lastContactText: c.lastContactedAt ? new Date(c.lastContactedAt).toLocaleDateString("en-IN") : "Never",
+                followupText: c.followupDate ? formatDateIN(c.followupDate) : "-",
+                lastContactText: c.lastContactedAt ? formatDateIN(c.lastContactedAt) : "Never",
                 totalActivities: c.totalActivities,
-                lastActivityText: c.lastActivityDate ? new Date(c.lastActivityDate).toLocaleDateString("en-IN") : "-",
+                lastActivityText: c.lastActivityDate ? formatDateIN(c.lastActivityDate) : "-",
                 hasFollowup: c.hasFollowup,
                 telHref: telLink(c.phone),
                 waHref: whatsappLink(c.phone, "Hi " + (c.name ?? "") + ", this is from Style Lounge."),

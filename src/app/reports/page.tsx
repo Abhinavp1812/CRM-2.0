@@ -4,6 +4,7 @@ import Link from "next/link";
 import Layout from "@/components/Layout";
 import { getRemarkActivity, getAllUsersForFilter } from "@/lib/followups";
 import { LeadTemperatureBadge } from "@/components/StatusBadge";
+import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +115,7 @@ export default async function DailyReportPage({
               {rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
-                    {r.time.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    {formatTimeIN(r.time, { hour: "2-digit", minute: "2-digit" })}
                   </td>
                   <td className="px-3 py-3 font-medium text-gray-900">
                     <Link href={"/customers/" + r.customerId} className="hover:text-blue-700">
@@ -130,7 +131,7 @@ export default async function DailyReportPage({
                   </td>
                   <td className="px-3 py-3 text-gray-500 max-w-xs truncate">{r.note || "-"}</td>
                   <td className="px-3 py-3 text-gray-600 whitespace-nowrap">
-                    {r.nextFollowupDate ? r.nextFollowupDate.toLocaleDateString("en-IN") : "Closed"}
+                    {r.nextFollowupDate ? formatDateIN(r.nextFollowupDate) : "Closed"}
                   </td>
                 </tr>
               ))}

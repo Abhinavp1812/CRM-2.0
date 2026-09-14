@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import * as XLSX from "xlsx";
 import { getAgentPeriodStats, getRemarkActivity } from "@/lib/followups";
+import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
 
 export const maxDuration = 60;
 
@@ -52,8 +53,8 @@ export async function GET(req: Request) {
     wb,
     XLSX.utils.json_to_sheet(
       detail.map((r) => ({
-        Date: r.time.toLocaleDateString("en-IN"),
-        Time: r.time.toLocaleTimeString("en-IN"),
+        Date: formatDateIN(r.time),
+        Time: formatTimeIN(r.time),
         Agent: r.ownerName || "",
         Customer: r.customerName || "",
         Phone: r.phone,
@@ -61,7 +62,7 @@ export async function GET(req: Request) {
         Remark: r.remark || "",
         "Lead Temperature": r.leadTemperature || "",
         Note: r.note || "",
-        "Next Followup": r.nextFollowupDate ? r.nextFollowupDate.toLocaleDateString("en-IN") : "Closed",
+        "Next Followup": r.nextFollowupDate ? formatDateIN(r.nextFollowupDate) : "Closed",
       }))
     ),
     "Remark Detail"

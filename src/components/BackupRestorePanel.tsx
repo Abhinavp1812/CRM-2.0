@@ -8,6 +8,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import { formatDateTimeIN } from "@/lib/formatDate";
 import { BACKUP_VERSION, type BackupFile, type LinkedTable, type RestoreCounts } from "@/lib/backup/types";
 
 const BATCH_SIZE = 1500;
@@ -187,7 +188,7 @@ export default function BackupRestorePanel() {
               <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-amber-900">
                 <p className="font-semibold">
-                  This file was exported {new Date(parsed.exportedAt).toLocaleString("en-IN")} and contains{" "}
+                  This file was exported {formatDateTimeIN(parsed.exportedAt)} and contains{" "}
                   {parsed.counts.customers.toLocaleString()} customers, {parsed.counts.bookings.toLocaleString()} bookings,
                   and {parsed.counts.activities.toLocaleString()} activity records.
                 </p>

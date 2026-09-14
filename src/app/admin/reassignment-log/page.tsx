@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Layout from "@/components/Layout";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
+import { formatDateIN, formatDateTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function ReassignmentLogPage() {
                       <p className="text-xs text-slate-400 font-mono mt-0.5">{log.customer.phone}</p>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 whitespace-nowrap">{new Date(log.createdAt).toLocaleDateString("en-IN")}</p>
+                  <p className="text-xs text-slate-400 whitespace-nowrap">{formatDateIN(log.createdAt)}</p>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-600">
                   <span className="bg-slate-100 px-2 py-0.5 rounded font-medium">{log.oldValue || "—"}</span>
@@ -77,7 +78,7 @@ export default async function ReassignmentLogPage() {
                 {logs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
-                      {new Date(log.createdAt).toLocaleString("en-IN")}
+                      {formatDateTimeIN(log.createdAt)}
                     </td>
                     <td className="px-4 py-3">
                       {log.customer ? (
