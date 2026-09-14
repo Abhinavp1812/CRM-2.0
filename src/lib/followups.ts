@@ -539,6 +539,92 @@ export function telLink(phone: string): string {
   return `tel:+91${phone}`;
 }
 
+// === Remark activity report (daily / weekly / monthly) ===
+// Reads ActivityLog directly, not Followup - a closing remark (Not Interested,
+// Converted, etc.) deletes the Followup row (see api/followups/save/route.ts),
+// so ActivityLog is the only place that day's full remark history still lives.
+
+export interface RemarkActivityRow {
+  id: string;
+  time: Date;
+  customerId: string;
+  customerName: string | null;
+  phone: string;
+  city: string | null;
+  ownerName: string | null;
+  remark: string | null;
+  leadTemperature: "HOT" | "WARM" | "COLD" | null;
+  note: string | null;
+  nextFollowupDate: Date | null;
+}
+
+export async function getRemarkActivity(
+  scope: { ownerId: string | null },
+  range: { start: Date; end: Date }
+): Promise<RemarkActivityRow[]> {
+  const rows = await prisma.activityLog.findMany({
+    where: {
+      activityType: "REMARK_ADDED",
+      createdAt: { gte: range.start, lt: range.end },
+      customer: {
+        deletedAt: null,
+        ...(scope.ownerId ? { ownerId: scope.ownerId } : {}),
+      },
+    },
+    include: {
+      customer: { select: { id: true, name: true, phone: true, city: true, owner: { select: { name: true } } } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    time: r.createdAt,
+    customerId: r.customer.id,
+    customerName: r.customer.name,
+    phone: r.customer.phone,
+    city: r.customer.city,
+    ownerName: r.customer.owner?.name || null,
+    remark: r.remark,
+    leadTemperature: r.leadTemperature,
+    note: r.note,
+    nextFollowupDate: r.newValue ? new Date(r.newValue) : null,
+  }));
+}
+
+export interface AgentPeriodStat {
+  agentId: string;
+  agentName: string;
+  callsLogged: number;
+  remarksLogged: number;
+  booked: number;
+  converted: number;
+  notInterested: number;
+  activeFollowupsNow: number;
+}
+
+export async function getAgentPeriodStats(range: { start: Date; end: Date }): Promise<AgentPeriodStat[]> {
+  const agents = await prisma.user.findMany({
+    where: { role: "AGENT", deletedAt: null },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
+  return Promise.all(
+    agents.map(async (a) => {
+      const [callsLogged, remarksLogged, booked, converted, notInterested, activeFollowupsNow] = await Promise.all([
+        prisma.activityLog.count({ where: { userId: a.id, activityType: "CALL_LOGGED", createdAt: { gte: range.start, lt: range.end } } }),
+        prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", createdAt: { gte: range.start, lt: range.end } } }),
+        prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", remark: "Booked", createdAt: { gte: range.start, lt: range.end } } }),
+        prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", remark: "Converted", createdAt: { gte: range.start, lt: range.end } } }),
+        prisma.activityLog.count({ where: { userId: a.id, activityType: "REMARK_ADDED", remark: "Not Interested", createdAt: { gte: range.start, lt: range.end } } }),
+        prisma.followup.count({ where: { customer: { ownerId: a.id, deletedAt: null, doNotContact: false } } }),
+      ]);
+      return { agentId: a.id, agentName: a.name, callsLogged, remarksLogged, booked, converted, notInterested, activeFollowupsNow };
+    })
+  );
+}
+
 export async function getActiveRemarkOptions() {
   return prisma.remarkOption.findMany({
     where: { isActive: true },
@@ -595,20 +681,32 @@ export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, p
   if (filter.ownerId) where.ownerId = filter.ownerId;
   if (filter.customerType && filter.customerType !== "all") where.customerType = filter.customerType;
   if (filter.followupState === "dnc") where.doNotContact = true;
-  else if (filter.followupState === "closed") {
+  if (filter.followupState === "closed") {
+    // A closed customer has no Followup row at all, so a remark/temperature filter
+    // (both live on Followup) can never apply here - closed wins outright.
     where.doNotContact = false;
     where.followup = null;
-  } else if (filter.followupState === "active") {
-    where.doNotContact = false;
-    where.followup = { isNot: null };
-  } else if (filter.followupState === "contacted") {
-    // Matches the "Called" / "Booked" counts on Team Stats exactly: every owned,
-    // non-DNC customer with a followup that's actually been reached at least once.
-    where.doNotContact = false;
-    where.followup = { lastContactedAt: { not: null } };
+  } else {
+    // Every other branch narrows the *same* to-one relation, so all its conditions
+    // must land in one flat object passed via `is` - mixing `isNot`/`is` relation
+    // keys with plain scalar keys in the same object is invalid and throws at
+    // runtime (that was the actual bug: `{ isNot: null, leadTemperature: ... }`).
+    const followupScalar: Record<string, unknown> = {};
+    let requireFollowup = false;
+    if (filter.followupState === "active") {
+      where.doNotContact = false;
+      requireFollowup = true;
+    } else if (filter.followupState === "contacted") {
+      // Matches the "Called" / "Booked" counts on Team Stats exactly: every owned,
+      // non-DNC customer with a followup that's actually been reached at least once.
+      where.doNotContact = false;
+      followupScalar.lastContactedAt = { not: null };
+      requireFollowup = true;
+    }
+    if (filter.remark) { followupScalar.currentRemark = filter.remark; requireFollowup = true; }
+    if (filter.leadTemperature) { followupScalar.leadTemperature = filter.leadTemperature; requireFollowup = true; }
+    if (requireFollowup) where.followup = { is: followupScalar };
   }
-  if (filter.remark) where.followup = { ...(where.followup as object || {}), currentRemark: filter.remark };
-  if (filter.leadTemperature) where.followup = { ...(where.followup as object || {}), leadTemperature: filter.leadTemperature };
 
   const [customers, total] = await Promise.all([
     prisma.customer.findMany({

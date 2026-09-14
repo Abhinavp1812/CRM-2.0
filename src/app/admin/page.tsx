@@ -11,6 +11,7 @@ import {
   ArrowsRightLeftIcon,
   ClipboardDocumentListIcon,
   QuestionMarkCircleIcon,
+  DocumentArrowDownIcon,
 } from "@heroicons/react/24/outline";
 
 export default async function AdminPage() {
@@ -52,6 +53,13 @@ export default async function AdminPage() {
           color="amber"
           title="Closed Followups"
           description="Re-engage Not Interested, DNC, and Service Taken customers"
+        />
+        <AdminTile
+          href="/admin/reports"
+          icon={DocumentArrowDownIcon}
+          color="green"
+          title="Agent Reports"
+          description="Weekly and monthly team activity reports, downloadable as Excel"
         />
         <AdminTile
           href="/admin/reassignment-log"

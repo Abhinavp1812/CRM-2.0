@@ -19,6 +19,7 @@ import {
   ExclamationTriangleIcon,
   QuestionMarkCircleIcon,
   ClipboardDocumentListIcon,
+  DocumentArrowDownIcon,
 } from "@heroicons/react/24/outline";
 import { signOut, useSession } from "next-auth/react";
 import SelfLeaveButton from "./SelfLeaveButton";
@@ -70,6 +71,7 @@ export default function Sidebar() {
   const userNav: NavItem[] = [
     { label: "Followups", href: "/", icon: HomeIcon },
     { label: "Customers", href: "/customers", icon: UserGroupIcon },
+    { label: "Daily Report", href: "/reports", icon: ClipboardDocumentListIcon },
   ];
   if (userRole === "AGENT") {
     userNav.push({ label: "My Stats", href: "/stats", icon: ChartBarIcon });
@@ -86,6 +88,7 @@ export default function Sidebar() {
     { label: "Data Sync", href: "/admin/imports", icon: ArrowPathIcon },
     { label: "Closed", href: "/admin/closed-followups", icon: NoSymbolIcon },
     { label: "Team Stats", href: "/admin/stats", icon: ChartBarIcon },
+    { label: "Agent Reports", href: "/admin/reports", icon: DocumentArrowDownIcon },
     { label: "Reassign Log", href: "/admin/reassignment-log", icon: ClipboardDocumentListIcon },
     { label: "Danger Zone", href: "/admin/danger", icon: ExclamationTriangleIcon },
     { label: "Help", href: "/admin/help", icon: QuestionMarkCircleIcon },
