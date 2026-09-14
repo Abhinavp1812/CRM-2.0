@@ -276,6 +276,11 @@ function FollowupRow({
           <LeadTemperatureBadge temperature={f.leadTemperature} />
           {f.currentRemark && <span className="text-xs text-slate-400">{f.currentRemark}</span>}
         </div>
+        {f.currentNote && (
+          <p className="text-xs text-slate-400 italic mt-0.5 max-w-xs truncate" title={f.currentNote}>
+            &ldquo;{f.currentNote}&rdquo;
+          </p>
+        )}
       </td>
       {showOwner && (
         <td className="px-4 py-3 text-sm text-slate-600">{f.ownerName || "-"}</td>
@@ -355,6 +360,9 @@ function FollowupCard({
         </Link>
         {f.currentRemark && (
           <p className="text-xs text-slate-400 mt-0.5">Last: {f.currentRemark}</p>
+        )}
+        {f.currentNote && (
+          <p className="text-xs text-slate-400 italic mt-0.5">&ldquo;{f.currentNote}&rdquo;</p>
         )}
       </div>
 
