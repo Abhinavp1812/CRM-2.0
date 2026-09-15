@@ -12,12 +12,27 @@ export { createManyChunked, findManyChunked } from "@/lib/dbBatch";
  * This runs at the end of every sync and gives any such customer a followup:
  * latest booking + followupDays for customers who have booked, today otherwise.
  * It only creates missing rows, and never touches an existing followup.
+ *
+ * Critical: a Followup row is ALSO deliberately deleted whenever an agent
+ * saves a closing remark (Not Interested, Converted, ...) or flags DNC (see
+ * api/followups/save/route.ts) - that customer has no Followup row too, but
+ * for a completely different reason: they were closed on purpose, not left
+ * behind by a timeout. Without the exclusion below, this function can't tell
+ * the two apart and was silently resurrecting every closed-out customer on
+ * every single sync run - wiping their remark/contact history back to
+ * "never contacted" and dumping them back in the active queue a few minutes
+ * after an agent closed them. Only a customer who has NEVER had a remark
+ * saved or been DNC-flagged is a genuine orphan.
  */
 export async function healMissingFollowups(userId: string, followupDays: number): Promise<number> {
   const LIMIT = 5000;
 
   const orphans = await prisma.customer.findMany({
-    where: { deletedAt: null, followup: null },
+    where: {
+      deletedAt: null,
+      followup: null,
+      activities: { none: { activityType: { in: ["REMARK_ADDED", "DNC_FLAGGED"] } } },
+    },
     select: { id: true },
     take: LIMIT,
   });
