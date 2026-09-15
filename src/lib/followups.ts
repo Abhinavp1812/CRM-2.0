@@ -249,16 +249,24 @@ export async function getFollowupCounts(scope: { userId: string | null }): Promi
 
   const total = cold + booked + todaysFollowup + pipeline + actionRequired;
 
+  // Registered / Booked (type) are meant to be "leads still awaiting first
+  // contact" - once an agent logs a remark or a call, that customer already
+  // has a home in one of the five status tabs above (Pipeline, Today, etc.),
+  // so it must drop out of here or it shows up twice across the tab bar.
   const [registered, bookedType] = await Promise.all([
     prisma.followup.count({
       where: {
         ...baseWhere,
+        currentRemark: null,
+        lastContactedAt: null,
         customer: { ...baseWhere.customer, customerType: "NEW_REGISTRATION" },
       },
     }),
     prisma.followup.count({
       where: {
         ...baseWhere,
+        currentRemark: null,
+        lastContactedAt: null,
         customer: { ...baseWhere.customer, customerType: "CUSTOMER" },
       },
     }),
@@ -293,7 +301,13 @@ async function applyFilter(
 
   const where: WhereInput = { customer: customerFilter };
 
-  if (filter === "cold") {
+  if (filter === "registered" || filter === "booked_type") {
+    // Awaiting first contact only - once touched, this customer already has a
+    // home in one of the status tabs (Pipeline, Today, etc.) and must not
+    // also show up here, or it appears twice across the tab bar.
+    where.currentRemark = null;
+    where.lastContactedAt = null;
+  } else if (filter === "cold") {
     const bookedIds = await getBookedCustomerIds(scope, newBookingCutoff);
     const arr = Array.from(bookedIds);
     where.currentRemark = null;
@@ -414,12 +428,19 @@ export async function getTodayFollowups(
   if (isRegistered || isBookedType) {
     const skip = (page - 1) * pageSize;
     const ownerId = scope.userId;
+    // Inner-joined to Followup and restricted to untouched (no remark, never
+    // contacted) so this only ever shows leads still awaiting first contact -
+    // once an agent works one, it belongs to a status tab (Pipeline, Today,
+    // etc.) instead, not here too, and a closed-out customer (no Followup row
+    // left at all) drops out of the list entirely, same as every other tab.
     const idRows = isRegistered
       ? await prisma.$queryRaw<{ id: string }[]>`
           SELECT c.id
           FROM "Customer" c
+          JOIN "Followup" f ON f."customerId" = c.id
           LEFT JOIN "Registration" r ON r."customerId" = c.id
           WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'NEW_REGISTRATION'
+            AND f."currentRemark" IS NULL AND f."lastContactedAt" IS NULL
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
           GROUP BY c.id
           ORDER BY MAX(r."onboardingDate") DESC NULLS LAST, c."firstSeenAt" DESC
@@ -428,8 +449,10 @@ export async function getTodayFollowups(
       : await prisma.$queryRaw<{ id: string }[]>`
           SELECT c.id
           FROM "Customer" c
+          JOIN "Followup" f ON f."customerId" = c.id
           LEFT JOIN "Booking" b ON b."customerId" = c.id
           WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'CUSTOMER'
+            AND f."currentRemark" IS NULL AND f."lastContactedAt" IS NULL
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
           GROUP BY c.id
           ORDER BY MAX(b."bookingDate") DESC NULLS LAST, c."firstSeenAt" DESC
