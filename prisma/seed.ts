@@ -13,7 +13,7 @@ const REMARK_OPTIONS = [
   { label: "Callback",                  defaultDaysAhead: 1,    autoFlagDnc: false, closesFollowup: false },
   { label: "Follow-up",                 defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
   { label: "Booked",                    defaultDaysAhead: 20,   autoFlagDnc: false, closesFollowup: false },
-  { label: "Converted",                 defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
+  { label: "Converted",                 defaultDaysAhead: 20,   autoFlagDnc: false, closesFollowup: false },
   { label: "Not Interested",            defaultDaysAhead: null, autoFlagDnc: false, closesFollowup: true  },
   { label: "Not Connected",             defaultDaysAhead: 2,    autoFlagDnc: false, closesFollowup: false },
   { label: "Location Issue",            defaultDaysAhead: 7,    autoFlagDnc: false, closesFollowup: false },
