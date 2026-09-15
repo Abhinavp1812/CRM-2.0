@@ -68,3 +68,81 @@ export async function healMissingFollowups(userId: string, followupDays: number)
   const res = await prisma.followup.createMany({ data, skipDuplicates: true });
   return res.count;
 }
+
+export interface ResurrectedFollowup {
+  followupId: string;
+  customerId: string;
+  customerName: string | null;
+  phone: string;
+  lastRemark: string;
+  remarkAt: Date;
+  resurrectedAt: Date;
+}
+
+/**
+ * One-time repair for damage already done by the healMissingFollowups bug
+ * above (fixed 2026-09-15): finds every customer whose Followup currently
+ * looks untouched (no remark, never contacted) despite having a remark on
+ * record - which is only possible if it was wrongly recreated after being
+ * deliberately closed, since a legitimate reopen (admin "Reopen" button, or
+ * unflagging DNC) always leaves its own activity log entry after the last
+ * remark, and is excluded here. Read-only - use repairResurrectedFollowups
+ * to actually delete the confirmed rows.
+ */
+export async function findResurrectedFollowups(): Promise<ResurrectedFollowup[]> {
+  const candidates = await prisma.customer.findMany({
+    where: {
+      deletedAt: null,
+      followup: { currentRemark: null, lastContactedAt: null },
+      activities: { some: { activityType: "REMARK_ADDED" } },
+    },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      followup: { select: { id: true, updatedAt: true } },
+      activities: {
+        where: { activityType: { in: ["REMARK_ADDED", "FOLLOWUP_DATE_CHANGED", "DNC_UNFLAGGED"] } },
+        orderBy: { createdAt: "asc" },
+        select: { activityType: true, remark: true, note: true, createdAt: true },
+      },
+    },
+    take: 3000,
+  });
+
+  const found: ResurrectedFollowup[] = [];
+  for (const c of candidates) {
+    if (!c.followup) continue;
+    const acts = c.activities;
+    const lastRemark = [...acts].reverse().find((a) => a.activityType === "REMARK_ADDED");
+    if (!lastRemark) continue;
+    const reopenAfter = acts.find(
+      (a) =>
+        (a.activityType === "FOLLOWUP_DATE_CHANGED" &&
+          a.createdAt > lastRemark.createdAt &&
+          (a.note || "").toLowerCase().includes("re-opened")) ||
+        (a.activityType === "DNC_UNFLAGGED" && a.createdAt > lastRemark.createdAt)
+    );
+    if (reopenAfter) continue;
+    if (c.followup.updatedAt > lastRemark.createdAt) {
+      found.push({
+        followupId: c.followup.id,
+        customerId: c.id,
+        customerName: c.name,
+        phone: c.phone,
+        lastRemark: lastRemark.remark || "",
+        remarkAt: lastRemark.createdAt,
+        resurrectedAt: c.followup.updatedAt,
+      });
+    }
+  }
+  return found;
+}
+
+/** Deletes exactly the Followup rows findResurrectedFollowups() identifies, restoring their correct closed state. */
+export async function repairResurrectedFollowups(): Promise<number> {
+  const affected = await findResurrectedFollowups();
+  if (affected.length === 0) return 0;
+  const res = await prisma.followup.deleteMany({ where: { id: { in: affected.map((a) => a.followupId) } } });
+  return res.count;
+}

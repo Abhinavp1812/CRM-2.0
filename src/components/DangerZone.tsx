@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
+import { ExclamationTriangleIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/outline";
 
 type Target = "registrations" | "bookings" | "both" | "customers";
 
@@ -38,6 +38,153 @@ const WIPE_OPTIONS: WipeConfig[] = [
     confirmLabel: "Delete all customers and all data",
   },
 ];
+
+interface RepairExample {
+  name: string | null;
+  phone: string;
+  lastRemark: string;
+  remarkAt: string;
+  resurrectedAt: string;
+}
+
+function RepairResurrectedFollowups() {
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<{ count: number; examples: RepairExample[] } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadPreview() {
+    setLoading(true);
+    setError(null);
+    setDone(null);
+    try {
+      const res = await fetch("/api/admin/danger/repair-resurrected-followups");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load preview");
+      setPreview(data);
+      setConfirming(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runRepair() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/danger/repair-resurrected-followups", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to repair");
+      setDone(data.deletedCount);
+      setPreview(null);
+      setConfirming(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-amber-200 rounded-xl p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="p-2 rounded-lg bg-amber-100 flex-shrink-0">
+          <WrenchScrewdriverIcon className="h-5 w-5 text-amber-600" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-gray-900">Repair Resurrected Followups</h3>
+          <p className="text-sm text-slate-500 mt-1">
+            One-time cleanup for a fixed sync bug that was recreating a blank follow-up for customers already
+            closed out (Not Interested, Converted, DNC) - wiping their remark and &quot;last contacted&quot; back
+            to never. This deletes only those wrongly-recreated rows; the customer&apos;s actual remark/contact
+            history is untouched either way.
+          </p>
+
+          {done !== null && (
+            <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
+              Done. Restored {done} customer{done !== 1 ? "s" : ""} to their correct closed state.
+            </div>
+          )}
+
+          {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+
+          {!preview && done === null && (
+            <button
+              onClick={loadPreview}
+              disabled={loading}
+              className="mt-3 px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            >
+              {loading ? "Checking…" : "Preview affected customers"}
+            </button>
+          )}
+
+          {preview && (
+            <div className="mt-3">
+              {preview.count === 0 ? (
+                <p className="text-sm text-slate-500">Nothing to repair - no affected customers found.</p>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-gray-800 mb-2">
+                    Found {preview.count} affected customer{preview.count !== 1 ? "s" : ""}. Examples:
+                  </p>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 text-gray-600 uppercase">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left">Customer</th>
+                          <th className="px-2 py-1.5 text-left">Phone</th>
+                          <th className="px-2 py-1.5 text-left">Last Remark</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {preview.examples.map((e, i) => (
+                          <tr key={i}>
+                            <td className="px-2 py-1.5">{e.name || "(no name)"}</td>
+                            <td className="px-2 py-1.5 font-mono">{e.phone}</td>
+                            <td className="px-2 py-1.5">{e.lastRemark}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!confirming ? (
+                    <button
+                      onClick={() => setConfirming(true)}
+                      className="px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors"
+                    >
+                      Repair these {preview.count} customers
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-700">Confirm: delete these {preview.count} bad rows?</span>
+                      <button
+                        onClick={runRepair}
+                        disabled={loading}
+                        className="px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      >
+                        {loading ? "Repairing…" : "Yes, repair"}
+                      </button>
+                      <button
+                        onClick={() => setConfirming(false)}
+                        disabled={loading}
+                        className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DangerZone() {
   const [active, setActive] = useState<WipeConfig | null>(null);
@@ -83,6 +230,10 @@ export default function DangerZone() {
 
   return (
     <div>
+      <div className="mb-6">
+        <RepairResurrectedFollowups />
+      </div>
+
       {result && (
         <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
           {result.customers > 0
