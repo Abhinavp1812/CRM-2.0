@@ -12,6 +12,7 @@ import {
   ClipboardDocumentListIcon,
   QuestionMarkCircleIcon,
   DocumentArrowDownIcon,
+  CalendarDaysIcon,
 } from "@heroicons/react/24/outline";
 
 export default async function AdminPage() {
@@ -60,6 +61,13 @@ export default async function AdminPage() {
           color="green"
           title="Agent Reports"
           description="Weekly and monthly team activity reports, downloadable as Excel"
+        />
+        <AdminTile
+          href="/admin/tracker"
+          icon={CalendarDaysIcon}
+          color="blue"
+          title="Tracker"
+          description="Registrations and bookings in a date range - click a count to see the customers"
         />
         <AdminTile
           href="/admin/reassignment-log"
