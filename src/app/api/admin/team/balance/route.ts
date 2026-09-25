@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notOnLeaveWhere } from "@/lib/leave";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -11,7 +12,7 @@ export async function POST(req: Request) {
   const { preview = false, untouchedFirst = false } = body;
 
   const agents = await prisma.user.findMany({
-    where: { role: "AGENT", deletedAt: null, onLeaveFrom: null },
+    where: { role: "AGENT", deletedAt: null, ...notOnLeaveWhere() },
     select: { id: true, name: true },
   });
   const agentIds = agents.map((a) => a.id);

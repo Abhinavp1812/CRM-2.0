@@ -4,6 +4,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
 import { startOfTodayIST } from "@/lib/formatDate";
+import { isOnLeaveNow } from "@/lib/leave";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function AdminStatsPage() {
 
   const agents = await prisma.user.findMany({
     where: { role: "AGENT", deletedAt: null },
-    select: { id: true, name: true, onLeaveFrom: true },
+    select: { id: true, name: true, onLeaveFrom: true, onLeaveUntil: true },
     orderBy: { name: "asc" },
   });
 
@@ -68,7 +69,7 @@ export default async function AdminStatsPage() {
       ]);
 
       return {
-        id: a.id, name: a.name, onLeave: !!a.onLeaveFrom,
+        id: a.id, name: a.name, onLeave: isOnLeaveNow(a.onLeaveFrom, a.onLeaveUntil),
         ownedCount, ownedActive, ownedDnc, callsThisWeek, dueToday,
         customersContacted, customersBooked,
         conversionRate: customersContacted > 0 ? Math.round((customersBooked / customersContacted) * 100) : 0,

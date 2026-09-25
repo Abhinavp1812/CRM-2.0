@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { notOnLeaveWhere } from "@/lib/leave";
 import type { AgentBreakdown } from "./types";
 
 export interface OwnerPick {
@@ -25,7 +26,7 @@ export async function loadAssignment() {
       select: { id: true, name: true, role: true },
     }),
     prisma.user.findMany({
-      where: { role: "AGENT", deletedAt: null, isActive: true, onLeaveFrom: null },
+      where: { role: "AGENT", deletedAt: null, isActive: true, ...notOnLeaveWhere() },
       select: { id: true, name: true },
     }),
   ]);

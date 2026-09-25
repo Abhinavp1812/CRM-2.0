@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notOnLeaveWhere } from "@/lib/leave";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
@@ -83,7 +84,7 @@ export async function PATCH(req: Request) {
 
     if (roundRobin) {
       // find active agents excluding this one
-      const agents = await prisma.user.findMany({ where: { role: "AGENT", deletedAt: null, id: { not: id }, onLeaveFrom: null }, select: { id: true } });
+      const agents = await prisma.user.findMany({ where: { role: "AGENT", deletedAt: null, id: { not: id }, ...notOnLeaveWhere() }, select: { id: true } });
       if (agents.length === 0) return NextResponse.json({ error: "No available agents to reassign" }, { status: 400 });
 
       // Balance to equalize loads: compute current counts and greedily assign owned customers to least-loaded agent
@@ -158,7 +159,7 @@ export async function PATCH(req: Request) {
 
     async function loadAgents() {
       const agents = await prisma.user.findMany({
-        where: { role: "AGENT", deletedAt: null, id: { not: id }, onLeaveFrom: null },
+        where: { role: "AGENT", deletedAt: null, id: { not: id }, ...notOnLeaveWhere() },
         select: { id: true },
       });
       return agents;
@@ -240,7 +241,7 @@ export async function DELETE(req: Request) {
     const { destinationId, roundRobin } = body;
     if (destinationId || roundRobin) {
       if (roundRobin) {
-        const agents = await prisma.user.findMany({ where: { role: "AGENT", deletedAt: null, id: { not: id }, onLeaveFrom: null }, select: { id: true } });
+        const agents = await prisma.user.findMany({ where: { role: "AGENT", deletedAt: null, id: { not: id }, ...notOnLeaveWhere() }, select: { id: true } });
         if (agents.length === 0) return NextResponse.json({ error: "No available agents to reassign" }, { status: 400 });
         const agentIds = agents.map((a) => a.id);
         const counts = await prisma.customer.groupBy({ by: ["ownerId"], where: { ownerId: { in: agentIds }, deletedAt: null }, _count: { _all: true } });

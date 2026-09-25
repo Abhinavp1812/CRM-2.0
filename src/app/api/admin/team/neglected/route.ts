@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notOnLeaveWhere } from "@/lib/leave";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { startOfTodayIST } from "@/lib/formatDate";
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
 
   if (roundRobin) {
     const agents = await prisma.user.findMany({
-      where: { role: "AGENT", deletedAt: null, onLeaveFrom: null },
+      where: { role: "AGENT", deletedAt: null, ...notOnLeaveWhere() },
       select: { id: true },
     });
     if (agents.length === 0) return NextResponse.json({ error: "No active agents" }, { status: 400 });

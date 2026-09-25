@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { isOnLeaveNow } from "@/lib/leave";
 
 export async function GET() {
   const session = await auth();
@@ -35,6 +36,7 @@ export async function GET() {
   const payload = users.map((u) => ({
     ...u,
     customersOwned: countBy[u.id] || 0,
+    onLeaveNow: isOnLeaveNow(u.onLeaveFrom, u.onLeaveUntil),
   }));
 
   return NextResponse.json({ success: true, users: payload });

@@ -5,6 +5,7 @@ import Layout from "@/components/Layout";
 import SyncPanel from "@/components/SyncPanel";
 import { prisma } from "@/lib/prisma";
 import { getSyncStatus } from "@/lib/sync/run";
+import { isOnLeaveNow } from "@/lib/leave";
 import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export default async function DataSyncHub() {
         name: true,
         isActive: true,
         onLeaveFrom: true,
+        onLeaveUntil: true,
         _count: { select: { ownedCustomers: { where: { deletedAt: null } } } },
       },
       orderBy: { name: "asc" },
@@ -71,8 +73,8 @@ export default async function DataSyncHub() {
                 <tr><td colSpan={4} className="px-4 py-6 text-gray-500 text-center">No agents yet</td></tr>
               ) : agentBreakdown.map((a) => {
                 const pct = totalCustomers > 0 ? Math.round((a._count.ownedCustomers / totalCustomers) * 100) : 0;
-                const label = a.onLeaveFrom ? "On Leave" : a.isActive ? "Active" : "Inactive";
-                const statusColor = a.onLeaveFrom ? "text-yellow-600" : a.isActive ? "text-green-600" : "text-gray-400";
+                const label = isOnLeaveNow(a.onLeaveFrom, a.onLeaveUntil) ? "On Leave" : a.isActive ? "Active" : "Inactive";
+                const statusColor = isOnLeaveNow(a.onLeaveFrom, a.onLeaveUntil) ? "text-yellow-600" : a.isActive ? "text-green-600" : "text-gray-400";
                 return (
                   <tr key={a.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">{a.name}</td>

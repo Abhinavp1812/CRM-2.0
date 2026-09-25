@@ -9,6 +9,7 @@ type UserRow = {
   isActive: boolean;
   onLeaveFrom?: string | null;
   onLeaveUntil?: string | null;
+  onLeaveNow?: boolean;
   customersOwned: number;
 };
 
@@ -256,15 +257,15 @@ export default function TeamManager() {
                 <p className="text-xs text-slate-500 mt-0.5">{u.email}</p>
               </div>
               <div className="flex flex-col items-end gap-1.5">
-                <span className={"text-xs font-semibold px-2 py-0.5 rounded-full border " + (u.onLeaveFrom ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
-                  {u.onLeaveFrom ? "On Leave" : "Active"}
+                <span className={"text-xs font-semibold px-2 py-0.5 rounded-full border " + (u.onLeaveNow ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
+                  {u.onLeaveNow ? "On Leave" : "Active"}
                 </span>
                 <span className="text-xs text-slate-500">{u.customersOwned} customers</span>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {u.role !== "ADMIN" && (
-                u.onLeaveFrom
+                u.onLeaveNow
                   ? <button onClick={() => bringBack(u.id)} className="text-xs px-2.5 h-7 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium">Bring Back</button>
                   : <button onClick={() => { setLeaveTarget(u.id); setLeaveFrom(null); setLeaveUntil(null); setShowLeave(true); }} className="text-xs px-2.5 h-7 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-medium">On Leave</button>
               )}
@@ -301,14 +302,14 @@ export default function TeamManager() {
                 <td className="px-4 py-3 text-slate-600">{u.email}</td>
                 <td className="px-4 py-3 text-slate-700">{u.customersOwned.toLocaleString()}</td>
                 <td className="px-4 py-3">
-                  <span className={"text-xs font-semibold px-2 py-0.5 rounded-full border " + (u.onLeaveFrom ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
-                    {u.onLeaveFrom ? "On Leave" : "Active"}
+                  <span className={"text-xs font-semibold px-2 py-0.5 rounded-full border " + (u.onLeaveNow ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
+                    {u.onLeaveNow ? "On Leave" : "Active"}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
                     {u.role !== "ADMIN" && (
-                      u.onLeaveFrom
+                      u.onLeaveNow
                         ? <button onClick={() => bringBack(u.id)} className="text-sm text-emerald-600 hover:text-emerald-800 font-medium">Bring Back</button>
                         : <button onClick={() => { setLeaveTarget(u.id); setLeaveFrom(null); setLeaveUntil(null); setShowLeave(true); }} className="text-sm text-amber-600 hover:text-amber-800 font-medium">On Leave</button>
                     )}
