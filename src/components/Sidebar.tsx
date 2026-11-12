@@ -22,6 +22,7 @@ import {
   DocumentArrowDownIcon,
   CalendarDaysIcon,
   TagIcon,
+  LightBulbIcon,
 } from "@heroicons/react/24/outline";
 import { signOut, useSession } from "next-auth/react";
 import SelfLeaveButton from "./SelfLeaveButton";
@@ -90,6 +91,7 @@ export default function Sidebar() {
     { label: "Data Sync", href: "/admin/imports", icon: ArrowPathIcon },
     { label: "Closed", href: "/admin/closed-followups", icon: NoSymbolIcon },
     { label: "Team Stats", href: "/admin/stats", icon: ChartBarIcon },
+    { label: "Insights", href: "/admin/insights", icon: LightBulbIcon },
     { label: "Tracker", href: "/admin/tracker", icon: CalendarDaysIcon },
     { label: "Agent Reports", href: "/admin/reports", icon: DocumentArrowDownIcon },
     { label: "Lead Sources", href: "/admin/lead-sources", icon: TagIcon },

@@ -14,6 +14,7 @@ import {
   DocumentArrowDownIcon,
   CalendarDaysIcon,
   TagIcon,
+  LightBulbIcon,
 } from "@heroicons/react/24/outline";
 
 export default async function AdminPage() {
@@ -62,6 +63,13 @@ export default async function AdminPage() {
           color="green"
           title="Agent Reports"
           description="Weekly and monthly team activity reports, downloadable as Excel"
+        />
+        <AdminTile
+          href="/admin/insights"
+          icon={LightBulbIcon}
+          color="amber"
+          title="Insights"
+          description="Why customers stop booking - regulars who went quiet, failed payments, salon and coupon return rates"
         />
         <AdminTile
           href="/admin/tracker"

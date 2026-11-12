@@ -19,16 +19,25 @@ import type { TrackerRange } from "@/lib/tracker";
 
 const PAID_BOOKING = Prisma.sql`b."paymentStatus" IN ('Success', 'Partially Paid') AND COALESCE(b."status", '') <> 'Cancelled'`;
 
-/** Every paid booking, numbered per customer in the order placed (n = 1 is their first). */
+/**
+ * Every paid booking, numbered per customer. n is the VISIT number - one booking
+ * day, since customers often place several orders on the same day (one per
+ * service) and those must not count as repeat bookings. order_rank numbers the
+ * orders themselves (1 = their very first order).
+ */
 const NUMBERED_PAID_BOOKINGS = Prisma.sql`
   numbered AS (
     SELECT b.id, b."customerId", b."orderNo", b."orderDate", b."bookingDate", b."status",
            b."salonId", b."salonNameSnapshot", b."grandTotal"::text AS "grandTotal",
            COALESCE(b."orderDate", b."bookingDate") AS d,
+           DENSE_RANK() OVER (
+             PARTITION BY b."customerId"
+             ORDER BY COALESCE(b."orderDate", b."bookingDate")::date
+           ) AS n,
            ROW_NUMBER() OVER (
              PARTITION BY b."customerId"
              ORDER BY COALESCE(b."orderDate", b."bookingDate"), b."createdAt", b.id
-           ) AS n
+           ) AS order_rank
     FROM "Booking" b
     JOIN "Customer" c ON c.id = b."customerId"
     WHERE c."deletedAt" IS NULL AND ${PAID_BOOKING} AND COALESCE(b."orderDate", b."bookingDate") IS NOT NULL
@@ -49,7 +58,7 @@ export async function getBehaviourCounts(window: TrackerRange): Promise<Behaviou
       SELECT
         COUNT(*) FILTER (WHERE n > 1 AND d >= ${window.from} AND d < ${window.to}) AS repeat_bookings,
         COUNT(DISTINCT "customerId") FILTER (WHERE n > 1 AND d >= ${window.from} AND d < ${window.to}) AS repeat_customers,
-        COUNT(*) FILTER (WHERE n = 1 AND d >= ${window.from} AND d < ${window.to}) AS new_bookers
+        COUNT(*) FILTER (WHERE order_rank = 1 AND d >= ${window.from} AND d < ${window.to}) AS new_bookers
       FROM numbered`,
     prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*) AS count FROM "Customer" c
@@ -61,7 +70,7 @@ export async function getBehaviourCounts(window: TrackerRange): Promise<Behaviou
         SELECT b."customerId" FROM "Booking" b
         JOIN "Customer" c ON c.id = b."customerId"
         WHERE c."deletedAt" IS NULL AND ${PAID_BOOKING}
-        GROUP BY b."customerId" HAVING COUNT(*) = 1
+        GROUP BY b."customerId" HAVING COUNT(DISTINCT COALESCE(b."orderDate", b."bookingDate")::date) = 1
       ) once`,
   ]);
 
@@ -125,7 +134,10 @@ function toBookingRow(r: BookingRowRaw): BehaviourBookingRow {
   };
 }
 
-/** Repeat bookings (isRepeat) or first-ever bookings, i.e. new bookers (!isRepeat), placed inside the window. */
+/**
+ * Repeat bookings (isRepeat: every order from their 2nd visit onward) or new
+ * bookers (!isRepeat: one row per customer, their very first order), inside the window.
+ */
 export async function getWindowedBookings(
   window: TrackerRange,
   isRepeat: boolean,
@@ -133,7 +145,7 @@ export async function getWindowedBookings(
   pageSize = 50
 ): Promise<BehaviourBookingRow[]> {
   const skip = (page - 1) * pageSize;
-  const nFilter = isRepeat ? Prisma.sql`nb.n > 1` : Prisma.sql`nb.n = 1`;
+  const nFilter = isRepeat ? Prisma.sql`nb.n > 1` : Prisma.sql`nb.order_rank = 1`;
   const rows = await prisma.$queryRaw<BookingRowRaw[]>`
     WITH ${NUMBERED_PAID_BOOKINGS}
     SELECT nb.id, nb."customerId", c.name, c.phone, c.city, u.name AS "ownerName", nb."orderNo", nb."orderDate",
@@ -148,12 +160,12 @@ export async function getWindowedBookings(
   return rows.map(toBookingRow);
 }
 
-/** Customers with exactly one paid booking ever - that single booking is shown. */
+/** Customers with exactly one visit ever - one row each, their first order of that visit. */
 export async function getBookedOnce(page = 1, pageSize = 50): Promise<BehaviourBookingRow[]> {
   const skip = (page - 1) * pageSize;
   const rows = await prisma.$queryRaw<BookingRowRaw[]>`
     WITH ${NUMBERED_PAID_BOOKINGS},
-    singles AS (SELECT "customerId" FROM numbered GROUP BY "customerId" HAVING COUNT(*) = 1)
+    singles AS (SELECT "customerId" FROM numbered GROUP BY "customerId" HAVING MAX(n) = 1)
     SELECT nb.id, nb."customerId", c.name, c.phone, c.city, u.name AS "ownerName", nb."orderNo", nb."orderDate",
            nb."bookingDate", COALESCE(s.name, nb."salonNameSnapshot") AS "salonName", nb."status", nb."grandTotal", nb.n
     FROM numbered nb
@@ -161,6 +173,7 @@ export async function getBookedOnce(page = 1, pageSize = 50): Promise<BehaviourB
     JOIN "Customer" c ON c.id = nb."customerId"
     LEFT JOIN "User" u ON u.id = c."ownerId"
     LEFT JOIN "Salon" s ON s.id = nb."salonId"
+    WHERE nb.order_rank = 1
     ORDER BY nb.d DESC, nb.id
     LIMIT ${pageSize} OFFSET ${skip}`;
   return rows.map(toBookingRow);

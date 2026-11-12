@@ -33,7 +33,7 @@ const amount = (v: string | null) => (v ? Math.round(Number(v) * 100) / 100 : ""
 function behaviourRows(rows: BehaviourBookingRow[], withNumber: boolean): Pick<SheetData, "headers" | "rows"> {
   const headers = [
     "Customer", "Phone", "City", "Owner", "Salon", "Order No", "Order Date", "Booking Date",
-    ...(withNumber ? ["Booking #"] : []), "Status", "Amount",
+    ...(withNumber ? ["Visit #"] : []), "Status", "Amount",
   ];
   return {
     headers,
@@ -46,7 +46,7 @@ function behaviourRows(rows: BehaviourBookingRow[], withNumber: boolean): Pick<S
       "Order No": b.orderNo ?? "",
       "Order Date": date(b.orderDate),
       "Booking Date": date(b.bookingDate),
-      ...(withNumber ? { "Booking #": b.bookingNumber } : {}),
+      ...(withNumber ? { "Visit #": b.bookingNumber } : {}),
       Status: b.status ?? "",
       Amount: amount(b.grandTotal),
     })),

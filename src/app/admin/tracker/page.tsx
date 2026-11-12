@@ -169,7 +169,7 @@ export default async function TrackerPage({
           activeClass="bg-violet-50 border-violet-300"
           label="Repeat bookings"
           value={behaviour.repeatBookings}
-          note={`Paid bookings in the ${windowLabel} from customers who had booked before - ${behaviour.repeatCustomers.toLocaleString()} returning customers`}
+          note={`Paid bookings in the ${windowLabel} from customers on their 2nd visit or later - ${behaviour.repeatCustomers.toLocaleString()} returning customers`}
         />
         <TrackerCard
           href={buildHref({ type: "newbookers" })}
@@ -196,7 +196,7 @@ export default async function TrackerPage({
           activeClass="bg-violet-50 border-violet-300"
           label="Booked once, never again"
           value={behaviour.bookedOnce}
-          note="All time: customers with exactly one paid booking so far"
+          note="All time: customers who have visited only once (several orders on the same day count as one visit)"
         />
       </div>
       <p className="text-xs text-slate-400 -mt-3 mb-6">
@@ -311,7 +311,7 @@ function BehaviourBookingsTable({
             <th className="px-3 py-3">Salon</th>
             <th className="px-3 py-3">Order Date</th>
             <th className="px-3 py-3">Booking Date</th>
-            {showNumber && <th className="px-3 py-3">Booking #</th>}
+            {showNumber && <th className="px-3 py-3">Visit #</th>}
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3 text-right">Amount</th>
             <th className="px-3 py-3">Actions</th>
