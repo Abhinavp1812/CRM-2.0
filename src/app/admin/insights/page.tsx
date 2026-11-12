@@ -19,6 +19,7 @@ import {
   type ViewKey,
   type CustomerFacts,
   type FailedPaymentRow,
+  type LatestNote,
 } from "@/lib/insights";
 import { formatDateIN } from "@/lib/formatDate";
 
@@ -442,7 +443,7 @@ function FactsTable({ rows }: { rows: CustomerFacts[] }) {
             <th className="px-3 py-3">Last booking</th>
             <th className="px-3 py-3">Last salon</th>
             <th className="px-3 py-3">Signs</th>
-            <th className="px-3 py-3">Team&apos;s last remark</th>
+            <th className="px-3 py-3">Latest note</th>
             <th className="px-3 py-3"></th>
           </tr>
         </thead>
@@ -461,9 +462,8 @@ function FactsTable({ rows }: { rows: CustomerFacts[] }) {
               </td>
               <td className="px-3 py-3 text-gray-600">{r.lastSalon ?? "-"}</td>
               <td className="px-3 py-3 text-xs text-gray-600 min-w-[13rem] max-w-[16rem]">{r.signals.length ? r.signals.map(label).join("; ") : "-"}</td>
-              <td className="px-3 py-3 text-xs text-gray-600 min-w-[11rem] max-w-[14rem]">
-                {r.remarkSince ?? "-"}
-                {r.noteSince && <div className="text-slate-400 italic">&ldquo;{r.noteSince}&rdquo;</div>}
+              <td className="px-3 py-3 min-w-[14rem] max-w-[20rem]">
+                <NoteCell note={r.latestNote} />
               </td>
               <td className="px-3 py-3">
                 <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
@@ -472,6 +472,20 @@ function FactsTable({ rows }: { rows: CustomerFacts[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function NoteCell({ note }: { note: LatestNote | null }) {
+  if (!note) return <span className="text-xs text-slate-400">No notes yet</span>;
+  return (
+    <div className="text-xs">
+      <p className="text-gray-800 whitespace-pre-line">&ldquo;{note.text}&rdquo;</p>
+      <p className="text-slate-400 mt-1">
+        {note.remark ? note.remark + " · " : ""}
+        {formatDateIN(note.at)}
+        {note.by ? " · " + note.by : ""}
+      </p>
     </div>
   );
 }
@@ -491,6 +505,7 @@ function FailedTable({ rows }: { rows: FailedPaymentRow[] }) {
             <th className="px-3 py-3">Last try</th>
             <th className="px-3 py-3">Salon</th>
             <th className="px-3 py-3">Called since?</th>
+            <th className="px-3 py-3">Latest note</th>
             <th className="px-3 py-3"></th>
           </tr>
         </thead>
@@ -505,6 +520,9 @@ function FailedTable({ rows }: { rows: FailedPaymentRow[] }) {
               <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{formatDateIN(r.lastTriedAt)}</td>
               <td className="px-3 py-3 text-gray-600">{r.lastSalon ?? "-"}</td>
               <td className="px-3 py-3 text-gray-600">{r.contactedSince ? "Yes" : <span className="text-red-600">No</span>}</td>
+              <td className="px-3 py-3 min-w-[14rem] max-w-[20rem]">
+                <NoteCell note={r.latestNote} />
+              </td>
               <td className="px-3 py-3">
                 <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
               </td>

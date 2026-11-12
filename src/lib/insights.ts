@@ -51,10 +51,16 @@ export interface CustomerFacts {
   firstCoupon: string | null;
   firstSalon: string | null;
   lastSalon: string | null;
-  /** Team's latest remark/note recorded after their last paid booking. */
-  remarkSince: string | null;
-  noteSince: string | null;
+  /** The team's most recent note on this customer from any time, with who wrote it and when. */
+  latestNote: LatestNote | null;
   signals: SignalKey[];
+}
+
+export interface LatestNote {
+  text: string;
+  remark: string | null;
+  at: Date;
+  by: string | null;
 }
 
 export interface FailedPaymentRow {
@@ -67,6 +73,7 @@ export interface FailedPaymentRow {
   lastTriedAt: Date;
   lastSalon: string | null;
   contactedSince: boolean;
+  latestNote: LatestNote | null;
 }
 
 type BookingLite = {
@@ -83,6 +90,17 @@ type BookingLite = {
 const isPaid = (b: BookingLite) =>
   (b.paymentStatus === "Success" || b.paymentStatus === "Partially Paid") && b.status !== "Cancelled";
 const isBad = (b: BookingLite) => b.status === "Cancelled" || b.paymentStatus === "Refunded";
+
+/** Latest call/remark that carries a written note (acts are oldest-first). */
+function latestNoteOf(
+  acts: { remark: string | null; note: string | null; createdAt: Date; user: { name: string } | null }[]
+): LatestNote | null {
+  for (let i = acts.length - 1; i >= 0; i--) {
+    const note = acts[i].note?.trim();
+    if (note) return { text: note, remark: acts[i].remark, at: acts[i].createdAt, by: acts[i].user?.name ?? null };
+  }
+  return null;
+}
 
 /** orderDate is stored as a UTC-midnight calendar date, so its ISO date is the booking day. */
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
@@ -125,7 +143,7 @@ export async function loadInsights(): Promise<InsightsData> {
     }),
     prisma.activityLog.findMany({
       where: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, customer: { deletedAt: null } },
-      select: { customerId: true, activityType: true, remark: true, note: true, createdAt: true },
+      select: { customerId: true, activityType: true, remark: true, note: true, createdAt: true, user: { select: { name: true } } },
       orderBy: { createdAt: "asc" },
     }),
     prisma.customer.count({ where: { deletedAt: null, registrations: { some: {} } } }),
@@ -194,6 +212,7 @@ export async function loadInsights(): Promise<InsightsData> {
           lastTriedAt: lastTried.d,
           lastSalon: lastTried.salon,
           contactedSince: acts.some((a) => a.createdAt >= lastTried.d),
+          latestNote: latestNoteOf(acts),
         });
       }
       continue;
@@ -243,8 +262,7 @@ export async function loadInsights(): Promise<InsightsData> {
       firstCoupon: first.coupon,
       firstSalon: first.salon,
       lastSalon: last.salon,
-      remarkSince: lastRemark?.remark ?? null,
-      noteSince: lastRemark?.note ?? null,
+      latestNote: latestNoteOf(acts),
       signals,
     });
   }

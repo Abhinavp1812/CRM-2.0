@@ -14,6 +14,7 @@ import {
   type ViewKey,
   type CustomerFacts,
   type FailedPaymentRow,
+  type LatestNote,
 } from "@/lib/insights";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
 
@@ -21,7 +22,16 @@ export const maxDuration = 60;
 
 type Row = Record<string, string | number>;
 
-const signalLabel = (k: string) => SIGNALS.find((s) => s.key === k)?.label ?? k;
+function noteColumns(n: LatestNote | null): Row {
+  return {
+    "Latest note": n?.text ?? "",
+    "Note remark": n?.remark ?? "",
+    "Note date": n ? formatDateIN(n.at) : "",
+    "Note by": n?.by ?? "",
+  };
+}
+
+const signalLabel =(k: string) => SIGNALS.find((s) => s.key === k)?.label ?? k;
 
 function factsRows(rows: CustomerFacts[]): Row[] {
   return rows.map((r) => ({
@@ -40,8 +50,7 @@ function factsRows(rows: CustomerFacts[]): Row[] {
     "Last salon": r.lastSalon ?? "",
     "First coupon": r.firstCoupon ?? "",
     Signs: r.signals.map(signalLabel).join("; "),
-    "Team's last remark": r.remarkSince ?? "",
-    "Team's last note": r.noteSince ?? "",
+    ...noteColumns(r.latestNote),
   }));
 }
 
@@ -55,6 +64,7 @@ function failedRows(rows: FailedPaymentRow[]): Row[] {
     "Last try": formatDateIN(r.lastTriedAt),
     Salon: r.lastSalon ?? "",
     "Called since?": r.contactedSince ? "Yes" : "No",
+    ...noteColumns(r.latestNote),
   }));
 }
 
