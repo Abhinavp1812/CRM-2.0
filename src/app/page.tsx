@@ -281,6 +281,7 @@ function FollowupRow({
           <LeadTemperatureBadge temperature={f.leadTemperature} />
           {f.currentRemark && <span className="text-xs text-slate-400">{f.currentRemark}</span>}
         </div>
+        {f.leadSource && <LeadSourceTag label={f.leadSource} isAdmin={showOwner} />}
         {f.currentNote && (
           <p className="text-xs text-slate-400 italic mt-0.5 max-w-xs truncate" title={f.currentNote}>
             &ldquo;{f.currentNote}&rdquo;
@@ -373,6 +374,7 @@ function FollowupCard({
         {f.currentNote && (
           <p className="text-xs text-slate-400 italic mt-0.5">&ldquo;{f.currentNote}&rdquo;</p>
         )}
+        {f.leadSource && <LeadSourceTag label={f.leadSource} isAdmin={showOwner} />}
       </div>
 
       {/* Info row */}
@@ -409,6 +411,22 @@ function FollowupCard({
         </Link>
       </div>
     </div>
+  );
+}
+
+// ── Lead source (campaign) tag ────────────────────────────────────────────────
+
+function LeadSourceTag({ label, isAdmin }: { label: string; isAdmin: boolean }) {
+  // Admins see every customer in the campaign; agents see their own customers in it.
+  const href = (isAdmin ? "/admin/customers" : "/customers") + "?leadSource=" + encodeURIComponent(label);
+  return (
+    <Link
+      href={href}
+      title={"Lead source: " + label + " (see its customers)"}
+      className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-xs rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 max-w-xs truncate"
+    >
+      <span className="opacity-60">Source:</span> {label}
+    </Link>
   );
 }
 

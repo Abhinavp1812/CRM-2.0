@@ -38,12 +38,15 @@ export default function AdminCustomersTable({
   totalPages,
   prevHref,
   nextHref,
+  isAdmin = true,
 }: {
   rows: AdminCustomerClientRow[];
   page: number;
   totalPages: number;
   prevHref: string;
   nextHref: string;
+  /** Agents get the same list without the bulk-edit checkboxes or the Owner column. */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -153,6 +156,7 @@ export default function AdminCustomersTable({
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr className="text-left text-xs font-medium text-gray-700 uppercase">
+              {isAdmin && (
               <th className="px-3 py-3 w-8">
                 <input
                   type="checkbox"
@@ -163,11 +167,12 @@ export default function AdminCustomersTable({
                   className="rounded"
                 />
               </th>
+              )}
               <th className="px-3 py-3">Customer</th>
               <th className="px-3 py-3">Type</th>
               <th className="px-3 py-3">Phone</th>
               <th className="px-3 py-3">City</th>
-              <th className="px-3 py-3">Owner</th>
+              {isAdmin && <th className="px-3 py-3">Owner</th>}
               <th className="px-3 py-3">Temp</th>
               <th className="px-3 py-3">Source</th>
               <th className="px-3 py-3">Current State</th>
@@ -181,6 +186,7 @@ export default function AdminCustomersTable({
               const selectable = isSelectable(c);
               return (
                 <tr key={c.id} className={"hover:bg-gray-50 " + (selected.has(c.id) ? "bg-blue-50" : "")}>
+                  {isAdmin && (
                   <td className="px-3 py-3">
                     <input
                       type="checkbox"
@@ -191,6 +197,7 @@ export default function AdminCustomersTable({
                       className="rounded"
                     />
                   </td>
+                  )}
                   <td className="px-3 py-3">
                     <Link href={"/customers/" + c.id} className="font-medium text-gray-900 hover:text-blue-700">
                       {c.name ?? "(no name)"}
@@ -201,7 +208,7 @@ export default function AdminCustomersTable({
                   </td>
                   <td className="px-3 py-3 font-mono text-gray-700 whitespace-nowrap">{c.phoneFormatted}</td>
                   <td className="px-3 py-3 text-gray-600">{c.city ?? "-"}</td>
-                  <td className="px-3 py-3 text-gray-600">{c.ownerName ?? "-"}</td>
+                  {isAdmin && <td className="px-3 py-3 text-gray-600">{c.ownerName ?? "-"}</td>}
                   <td className="px-3 py-3"><LeadTemperatureBadge temperature={c.leadTemperature} /></td>
                   <td className="px-3 py-3 text-gray-600">{c.leadSource ?? "-"}</td>
                   <td className="px-3 py-3 text-gray-700 max-w-xs">
