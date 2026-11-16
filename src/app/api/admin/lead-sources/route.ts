@@ -6,8 +6,12 @@ export async function GET() {
   const session = await auth();
   if (session?.user?.role !== "ADMIN") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const sources = await prisma.leadSourceOption.findMany({ orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }] });
-  return NextResponse.json({ sources });
+  const [sources, counts] = await Promise.all([
+    prisma.leadSourceOption.findMany({ orderBy: [{ isActive: "desc" }, { sortOrder: "asc" }] }),
+    prisma.customer.groupBy({ by: ["leadSource"], where: { deletedAt: null, leadSource: { not: null } }, _count: { _all: true } }),
+  ]);
+  const countBy = new Map(counts.map((c) => [c.leadSource, c._count._all]));
+  return NextResponse.json({ sources: sources.map((s) => ({ ...s, customerCount: countBy.get(s.label) ?? 0 })) });
 }
 
 export async function POST(req: Request) {

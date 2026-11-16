@@ -12,7 +12,7 @@ export default async function LeadSourcesPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Lead Sources</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Manage the campaigns/channels agents can tag a customer with (e.g. &quot;Pedicure Campaign&quot;, &quot;Dyson Campaign&quot;).
+          Manage the campaigns/channels customers came from (e.g. &quot;Pedicure Campaign&quot;, &quot;Dyson Campaign&quot;), and import a campaign&apos;s phone list to tag its customers.
         </p>
       </div>
       <LeadSourceManager />
