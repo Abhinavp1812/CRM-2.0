@@ -7,24 +7,36 @@ import {
   formatPhone,
   whatsappLink,
   telLink,
+  NONE_VALUE,
   type AdminCustomerFilter,
 } from "@/lib/followups";
+import { buildQuery, listParam, oneParam, type SearchParamsRecord } from "@/lib/params";
+import MultiSelect from "@/components/MultiSelect";
 import AdminCustomersTable, { type AdminCustomerClientRow } from "@/components/AdminCustomersTable";
 import { formatDateIN } from "@/lib/formatDate";
 
 const PAGE_SIZE = 50;
 
-export interface CustomersSearchParams {
-  page?: string;
-  search?: string;
-  q?: string;
-  ownerId?: string;
-  customerType?: string;
-  followupState?: string;
-  remark?: string;
-  leadTemperature?: string;
-  leadSource?: string;
-}
+/** page, search (or legacy q), and the multi-value filters ownerId, customerType, followupState, remark, leadTemperature, leadSource. */
+export type CustomersSearchParams = SearchParamsRecord;
+
+const TYPE_OPTIONS = [
+  { value: "NEW_REGISTRATION", label: "Registered" },
+  { value: "CUSTOMER", label: "Booked" },
+];
+const STATE_OPTIONS = [
+  { value: "active", label: "Active followup" },
+  { value: "contacted", label: "Contacted (reached at least once)" },
+  { value: "closed", label: "Closed (no followup)" },
+  { value: "dnc", label: "DNC" },
+];
+const TEMP_OPTIONS = [
+  { value: "HOT", label: "Hot" },
+  { value: "WARM", label: "Warm" },
+  { value: "COLD", label: "Cold" },
+];
+const only = <T extends string>(values: string[], allowed: { value: string }[]) =>
+  values.filter((v) => allowed.some((a) => a.value === v)) as T[];
 
 /**
  * Filterable customer list shared by /customers and /admin/customers.
@@ -42,17 +54,17 @@ export default async function CustomersBrowser({
   isAdmin: boolean;
   restrictToOwnerId?: string;
 }) {
-  const page = Math.max(1, parseInt(params.page || "1", 10) || 1);
+  const page = Math.max(1, parseInt(oneParam(params.page) || "1", 10) || 1);
 
   const filter: AdminCustomerFilter = {
     // `q` is the old /customers search param - still accepted so old links work.
-    search: params.search || params.q || undefined,
-    ownerId: restrictToOwnerId ?? (params.ownerId || undefined),
-    customerType: (params.customerType as "NEW_REGISTRATION" | "CUSTOMER" | "all") || "all",
-    followupState: (params.followupState as "active" | "closed" | "dnc" | "contacted" | "all") || "all",
-    remark: params.remark || undefined,
-    leadTemperature: (params.leadTemperature as "HOT" | "WARM" | "COLD") || undefined,
-    leadSource: params.leadSource || undefined,
+    search: oneParam(params.search) || oneParam(params.q) || undefined,
+    ownerId: restrictToOwnerId ? [restrictToOwnerId] : listParam(params.ownerId),
+    customerType: only(listParam(params.customerType), TYPE_OPTIONS),
+    followupState: only(listParam(params.followupState), STATE_OPTIONS),
+    remark: listParam(params.remark),
+    leadTemperature: only(listParam(params.leadTemperature), TEMP_OPTIONS),
+    leadSource: listParam(params.leadSource),
   };
 
   const [{ rows, total }, users, remarkOptions, leadSources] = await Promise.all([
@@ -65,22 +77,26 @@ export default async function CustomersBrowser({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function buildUrl(overrides: Record<string, string | undefined>) {
-    const merged = {
-      search: filter.search,
-      ownerId: restrictToOwnerId ? undefined : filter.ownerId,
-      customerType: filter.customerType !== "all" ? filter.customerType : undefined,
-      followupState: filter.followupState !== "all" ? filter.followupState : undefined,
-      remark: filter.remark,
-      leadTemperature: filter.leadTemperature,
-      leadSource: filter.leadSource,
-      ...overrides,
-    };
-    const qs = Object.entries(merged)
-      .filter(([, v]) => v !== undefined && v !== "" && v !== "all")
-      .map(([k, v]) => k + "=" + encodeURIComponent(String(v)))
-      .join("&");
-    return basePath + (qs ? "?" + qs : "");
+    return (
+      basePath +
+      buildQuery({
+        search: filter.search,
+        ownerId: restrictToOwnerId ? undefined : filter.ownerId,
+        customerType: filter.customerType,
+        followupState: filter.followupState,
+        remark: filter.remark,
+        leadTemperature: filter.leadTemperature,
+        leadSource: filter.leadSource,
+        ...overrides,
+      })
+    );
   }
+
+  // Keep a value that came from a link (e.g. a deactivated campaign) selectable.
+  const withExtras = (opts: { value: string; label: string }[], chosen: string[] = []) => [
+    ...opts,
+    ...chosen.filter((v) => !opts.some((o) => o.value === v)).map((v) => ({ value: v, label: v })),
+  ];
 
   return (
     <>
@@ -93,53 +109,31 @@ export default async function CustomersBrowser({
           className="border rounded px-2 py-1.5 text-sm md:col-span-2"
         />
         {isAdmin && (
-          <select name="ownerId" defaultValue={filter.ownerId || ""} className="border rounded px-2 py-1.5 text-sm">
-            <option value="">All owners</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.role})
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            name="ownerId"
+            allLabel="All owners"
+            selected={filter.ownerId ?? []}
+            options={[...users.map((u) => ({ value: u.id, label: `${u.name} (${u.role})` })), { value: NONE_VALUE, label: "Unassigned" }]}
+          />
         )}
-        <select name="customerType" defaultValue={filter.customerType || "all"} className="border rounded px-2 py-1.5 text-sm">
-          <option value="all">All types</option>
-          <option value="NEW_REGISTRATION">Registered</option>
-          <option value="CUSTOMER">Booked</option>
-        </select>
-        <select name="followupState" defaultValue={filter.followupState || "all"} className="border rounded px-2 py-1.5 text-sm">
-          <option value="all">All states</option>
-          <option value="active">Active followup</option>
-          <option value="contacted">Contacted (reached at least once)</option>
-          <option value="closed">Closed (no followup)</option>
-          <option value="dnc">DNC</option>
-        </select>
-        <select name="remark" defaultValue={filter.remark || ""} className="border rounded px-2 py-1.5 text-sm">
-          <option value="">Any current remark</option>
-          {remarkOptions.map((r) => (
-            <option key={r.label} value={r.label}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-        <select name="leadTemperature" defaultValue={filter.leadTemperature || ""} className="border rounded px-2 py-1.5 text-sm">
-          <option value="">Any temperature</option>
-          <option value="HOT">Hot</option>
-          <option value="WARM">Warm</option>
-          <option value="COLD">Cold</option>
-        </select>
-        <select name="leadSource" defaultValue={filter.leadSource || ""} className="border rounded px-2 py-1.5 text-sm">
-          <option value="">Any lead source</option>
-          {leadSources.map((s) => (
-            <option key={s.label} value={s.label}>
-              {s.label}
-            </option>
-          ))}
-          {/* Keep a deactivated campaign selectable when a link points at it. */}
-          {filter.leadSource && !leadSources.some((s) => s.label === filter.leadSource) && (
-            <option value={filter.leadSource}>{filter.leadSource}</option>
-          )}
-        </select>
+        <MultiSelect name="customerType" allLabel="All types" selected={filter.customerType ?? []} options={TYPE_OPTIONS} />
+        <MultiSelect name="followupState" allLabel="All states" selected={filter.followupState ?? []} options={STATE_OPTIONS} />
+        <MultiSelect
+          name="remark"
+          allLabel="Any current remark"
+          selected={filter.remark ?? []}
+          options={withExtras(remarkOptions.map((r) => ({ value: r.label, label: r.label })), filter.remark)}
+        />
+        <MultiSelect name="leadTemperature" allLabel="Any temperature" selected={filter.leadTemperature ?? []} options={TEMP_OPTIONS} />
+        <MultiSelect
+          name="leadSource"
+          allLabel="Any lead source"
+          selected={filter.leadSource ?? []}
+          options={[
+            ...withExtras(leadSources.map((x) => ({ value: x.label, label: x.label })), filter.leadSource?.filter((v) => v !== NONE_VALUE)),
+            { value: NONE_VALUE, label: "No lead source" },
+          ]}
+        />
         <div className="md:col-span-5 flex items-center gap-2 justify-end">
           <span className="mr-auto text-sm text-gray-600">{total.toLocaleString()} matching</span>
           <Link href={basePath} className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded">

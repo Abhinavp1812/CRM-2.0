@@ -53,3 +53,13 @@ export function startOfTodayIST(): Date {
 export function todayIsoIST(): string {
   return startOfTodayIST().toISOString().slice(0, 10);
 }
+
+/**
+ * The exact instants an India calendar day starts and ends, for filtering
+ * timestamps (createdAt etc.) by "this day in India". `new Date(y, m, d)` would
+ * use the server's timezone - UTC on Vercel - and cut the day at 5:30 AM IST.
+ */
+export function istDayRange(isoDay: string): { start: Date; end: Date } {
+  const start = new Date(Date.parse(isoDay + "T00:00:00Z") - 330 * 60_000);
+  return { start, end: new Date(start.getTime() + 86_400_000) };
+}

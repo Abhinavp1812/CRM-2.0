@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { listParam, oneParam, type SearchParamsRecord } from "@/lib/params";
 
 /**
  * Admin > Insights: what happened to every lead, which campaigns work, and why
@@ -382,33 +383,40 @@ export interface InsightFilters {
   /** YYYY-MM-DD, inclusive - matched against the day the lead joined. */
   from?: string;
   to?: string;
-  campaign?: string;
-  /** Salon of their first paid visit. */
-  salon?: string;
-  /** ownerId, or NO_OWNER. */
-  owner?: string;
+  /** Any of these campaigns (NO_CAMPAIGN for none). Empty = all. */
+  campaign: string[];
+  /** Salon of their first paid visit - any of these. Empty = all. */
+  salon: string[];
+  /** ownerId or NO_OWNER - any of these. Empty = all. */
+  owner: string[];
 }
 
-export function parseFilters(sp: Record<string, string | undefined>): InsightFilters {
+export function parseFilters(sp: SearchParamsRecord): InsightFilters {
   const date = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
   return {
-    from: date(sp.from),
-    to: date(sp.to),
-    campaign: sp.campaign || undefined,
-    salon: sp.salon || undefined,
-    owner: sp.owner || undefined,
+    from: date(oneParam(sp.from)),
+    to: date(oneParam(sp.to)),
+    campaign: listParam(sp.campaign),
+    salon: listParam(sp.salon),
+    owner: listParam(sp.owner),
   };
 }
 
 export function applyFilters(leads: LeadFacts[], f: InsightFilters, skip: (keyof InsightFilters)[] = []) {
-  const use = (k: keyof InsightFilters) => f[k] && !skip.includes(k);
+  const on = (k: keyof InsightFilters) => !skip.includes(k);
+  const set = (k: "campaign" | "salon" | "owner") => (on(k) && f[k].length ? new Set(f[k]) : null);
+  const campaigns = set("campaign");
+  const salons = set("salon");
+  const owners = set("owner");
+  const from = on("from") ? f.from : undefined;
+  const to = on("to") ? f.to : undefined;
   return leads.filter(
     (l) =>
-      (!use("from") || l.joinedDay >= f.from!) &&
-      (!use("to") || l.joinedDay <= f.to!) &&
-      (!use("campaign") || l.campaign === f.campaign) &&
-      (!use("salon") || l.firstSalon === f.salon) &&
-      (!use("owner") || l.ownerKey === f.owner)
+      (!from || l.joinedDay >= from) &&
+      (!to || l.joinedDay <= to) &&
+      (!campaigns || campaigns.has(l.campaign)) &&
+      (!salons || (l.firstSalon !== null && salons.has(l.firstSalon))) &&
+      (!owners || owners.has(l.ownerKey))
   );
 }
 

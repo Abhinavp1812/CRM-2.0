@@ -2,38 +2,40 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import Layout from "@/components/Layout";
-import { getRemarkActivity, getAllUsersForFilter } from "@/lib/followups";
+import { getRemarkActivity, getAllUsersForFilter, getActiveRemarkOptions } from "@/lib/followups";
 import { LeadTemperatureBadge } from "@/components/StatusBadge";
-import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
+import MultiSelect from "@/components/MultiSelect";
+import { formatDateIN, formatTimeIN, todayIsoIST, istDayRange } from "@/lib/formatDate";
+import { buildQuery, listParam, oneParam, type SearchParamsRecord } from "@/lib/params";
 
 export const dynamic = "force-dynamic";
 
 export default async function DailyReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; ownerId?: string }>;
+  searchParams: Promise<SearchParamsRecord>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const isAdmin = session.user.role === "ADMIN";
 
   const params = await searchParams;
-  const dateStr = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayIsoIST();
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  const dateParam = oneParam(params.date);
+  const dateStr = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayIsoIST();
+  const { start: dayStart, end: dayEnd } = istDayRange(dateStr);
 
-  // Agents only ever see their own customers; only an admin can pick "all" or someone else.
-  const scopeOwnerId = isAdmin ? params.ownerId || null : session.user.id;
+  // Agents only ever see their own customers; only an admin can pick agents.
+  const pickedOwners = isAdmin ? listParam(params.ownerId) : [];
+  const scopeOwnerId = isAdmin ? pickedOwners : session.user.id;
+  const pickedRemarks = listParam(params.remark);
 
-  const [rows, agents] = await Promise.all([
-    getRemarkActivity({ ownerId: scopeOwnerId }, { start: dayStart, end: dayEnd }),
+  const [rows, agents, remarkOptions] = await Promise.all([
+    getRemarkActivity({ ownerId: scopeOwnerId, remarks: pickedRemarks }, { start: dayStart, end: dayEnd }),
     isAdmin ? getAllUsersForFilter() : Promise.resolve([]),
+    getActiveRemarkOptions(),
   ]);
 
-  const exportHref =
-    "/api/reports/daily/export?date=" + dateStr + (isAdmin && params.ownerId ? "&ownerId=" + params.ownerId : "");
+  const exportHref = "/api/reports/daily/export" + buildQuery({ date: dateStr, ownerId: pickedOwners, remark: pickedRemarks });
 
   return (
     <Layout>
@@ -57,20 +59,28 @@ export default async function DailyReportPage({
           />
         </div>
         {isAdmin && (
-          <div>
+          <div className="w-56">
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">Agent</label>
-            <select name="ownerId" defaultValue={params.ownerId || ""} className="border rounded px-2 py-1.5 text-sm">
-              <option value="">All agents</option>
-              {agents
-                .filter((a) => a.role === "AGENT")
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
+            <MultiSelect
+              name="ownerId"
+              allLabel="All agents"
+              selected={pickedOwners}
+              options={agents.filter((a) => a.role === "AGENT").map((a) => ({ value: a.id, label: a.name }))}
+            />
           </div>
         )}
+        <div className="w-56">
+          <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">Remark</label>
+          <MultiSelect
+            name="remark"
+            allLabel="All remarks"
+            selected={pickedRemarks}
+            options={[
+              ...remarkOptions.map((r) => ({ value: r.label, label: r.label })),
+              ...pickedRemarks.filter((v) => !remarkOptions.some((r) => r.label === v)).map((v) => ({ value: v, label: v })),
+            ]}
+          />
+        </div>
         <button type="submit" className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
           Apply
         </button>

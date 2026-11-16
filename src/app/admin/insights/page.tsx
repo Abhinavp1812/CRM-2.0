@@ -29,6 +29,8 @@ import {
   type Summary,
 } from "@/lib/insights";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
+import MultiSelect from "@/components/MultiSelect";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,24 +42,18 @@ const pct = (n: number, d: number) => (d ? Math.round((100 * n) / d) : 0);
 const rupees = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const num = (n: number) => n.toLocaleString("en-IN");
 
-type SP = Record<string, string | undefined>;
-
-function qs(params: SP) {
-  const s = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== "")
-    .map(([k, v]) => k + "=" + encodeURIComponent(String(v)))
-    .join("&");
-  return s ? "?" + s : "";
-}
+type SP = Record<string, string | string[] | undefined>;
+const qs = buildQuery;
 
 const filterParams = (f: InsightFilters): SP => ({ from: f.from, to: f.to, campaign: f.campaign, salon: f.salon, owner: f.owner });
 
-export default async function InsightsPage({ searchParams }: { searchParams: Promise<SP> }) {
+export default async function InsightsPage({ searchParams }: { searchParams: Promise<SearchParamsRecord> }) {
   const session = await auth();
   if (session?.user?.role !== "ADMIN") redirect("/");
 
-  const sp = await searchParams;
-  const filters = parseFilters(sp);
+  const raw = await searchParams;
+  const filters = parseFilters(raw);
+  const sp = Object.fromEntries(["page", "list", "reason", "temp", "rsalon", "rcoupon"].map((k) => [k, oneParam(raw[k])]));
   const page = Math.max(1, parseInt(sp.page || "1", 10) || 1);
   const list: ListQuery | null =
     sp.list && isListKey(sp.list)
@@ -75,7 +71,10 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
   const exportHref = (extra: SP) => "/api/admin/insights/export" + qs({ ...fp, ...extra });
 
   // Filter dropdown options come from all leads, so a choice never disappears.
-  const campaignOptions = countOptions(allLeads.map((l) => l.campaign)).filter((o) => o.key !== NO_CAMPAIGN);
+  const campaignCounts = countOptions(allLeads.map((l) => l.campaign));
+  const campaignOptions = campaignCounts.filter((o) => o.key !== NO_CAMPAIGN);
+  const noCampaignCount = campaignCounts.find((o) => o.key === NO_CAMPAIGN)?.count ?? 0;
+  const ownerCounts = new Map(countOptions(allLeads.map((l) => l.ownerKey)).map((o) => [o.key, o.count]));
   const salonOptions = countOptions(allLeads.filter((l) => l.firstSalon).map((l) => l.firstSalon!));
   const ownerOptions = Array.from(new Map(allLeads.map((l) => [l.ownerKey, l.ownerName])), ([key, label]) => ({ key, label })).sort((a, b) =>
     a.key === NO_OWNER ? 1 : b.key === NO_OWNER ? -1 : a.label.localeCompare(b.label)
@@ -142,29 +141,31 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
             <input type="date" name="to" defaultValue={filters.to ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm" />
           </Field>
           <Field label="Campaign">
-            <select name="campaign" defaultValue={filters.campaign ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm">
-              <option value="">All campaigns</option>
-              {campaignOptions.map((o) => (
-                <option key={o.key} value={o.key}>{o.key} ({num(o.count)})</option>
-              ))}
-              <option value={NO_CAMPAIGN}>No campaign</option>
-            </select>
+            <MultiSelect
+              name="campaign"
+              allLabel="All campaigns"
+              selected={filters.campaign}
+              options={[
+                ...campaignOptions.map((o) => ({ value: o.key, label: o.key, count: o.count })),
+                { value: NO_CAMPAIGN, label: "No campaign", count: noCampaignCount },
+              ]}
+            />
           </Field>
           <Field label="First booked at salon">
-            <select name="salon" defaultValue={filters.salon ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm">
-              <option value="">All salons</option>
-              {salonOptions.map((o) => (
-                <option key={o.key} value={o.key}>{o.key} ({num(o.count)})</option>
-              ))}
-            </select>
+            <MultiSelect
+              name="salon"
+              allLabel="All salons"
+              selected={filters.salon}
+              options={salonOptions.map((o) => ({ value: o.key, label: o.key, count: o.count }))}
+            />
           </Field>
           <Field label="Agent">
-            <select name="owner" defaultValue={filters.owner ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm">
-              <option value="">All agents</option>
-              {ownerOptions.map((o) => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
-            </select>
+            <MultiSelect
+              name="owner"
+              allLabel="All agents"
+              selected={filters.owner}
+              options={ownerOptions.map((o) => ({ value: o.key, label: o.label, count: ownerCounts.get(o.key) ?? 0 }))}
+            />
           </Field>
           <div className="flex gap-2">
             <button type="submit" className="flex-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Apply</button>
@@ -189,7 +190,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       </form>
       <p className="text-sm text-slate-600 mb-5">
         Showing <b>{num(s.leads)}</b> leads{filterSentence}. &ldquo;Joined&rdquo; = the day they registered or first tried to book, whichever came first.
-        {filters.salon && " The salon filter only keeps customers who booked, so leads who never booked aren't included."}
+        {filters.salon.length > 0 && " The salon filter only keeps customers who booked, so leads who never booked aren't included."}
       </p>
 
       {/* ---------- Headline numbers ---------- */}
@@ -231,7 +232,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
               <Link className="text-blue-600 underline" href={listHref({ list: "payment_failed" })}>See them</Link>
             </li>
           )}
-          {!filters.campaign && bestBooking && (
+          {filters.campaign.length === 0 && bestBooking && (
             <li>
               Best campaign for getting bookings: <b>{bestBooking.key}</b> - {pct(bestBooking.booked, bestBooking.leads)}% of its {num(bestBooking.leads)} leads
               booked{bestReturn && (
@@ -290,7 +291,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
         title="Campaign comparison"
         note={`Which campaigns bring leads who register, book and come back. Uses your date, salon and agent filters (not the campaign filter). "Came back" counts customers who first booked ${GRACE_DAYS}+ days ago. Click a campaign to filter the whole page.`}
       >
-        <CampaignTable rows={campaigns} selected={filters.campaign} hrefFor={(key) => filterHref({ campaign: filters.campaign === key ? undefined : key })} />
+        <CampaignTable rows={campaigns} selected={filters.campaign} hrefFor={(key) => filterHref({ campaign: onlyThis(filters.campaign, key) })} />
       </Section>
 
       {/* ---------- Reasons ---------- */}
@@ -331,7 +332,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
 
       {/* ---------- Agents ---------- */}
       <Section title="By agent" note="Leads currently owned by each agent. Click an agent to filter the whole page.">
-        <AgentTable rows={agents} ownerName={ownerName} hrefFor={(key) => filterHref({ owner: filters.owner === key ? undefined : key })} notContactedHref={(key) => "/admin/insights" + qs({ ...fp, owner: key, list: "not_contacted" }) + "#list"} />
+        <AgentTable rows={agents} ownerName={ownerName} hrefFor={(key) => filterHref({ owner: onlyThis(filters.owner, key) })} notContactedHref={(key) => "/admin/insights" + qs({ ...fp, owner: key, list: "not_contacted" }) + "#list"} />
       </Section>
 
       {/* ---------- Return rates ---------- */}
@@ -393,6 +394,11 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
 
 // ---------- helpers ----------
 
+/** Clicking a row picks just that value; clicking it again when it is the only one clears the filter. */
+function onlyThis(current: string[], key: string): string[] {
+  return current.length === 1 && current[0] === key ? [] : [key];
+}
+
 function countOptions(values: string[]) {
   const m = new Map<string, number>();
   for (const v of values) m.set(v, (m.get(v) ?? 0) + 1);
@@ -404,9 +410,10 @@ function describeFilters(f: InsightFilters, ownerName: Map<string, string>) {
   if (f.from && f.to) parts.push(`who joined ${formatDateIN(f.from)} - ${formatDateIN(f.to)}`);
   else if (f.from) parts.push(`who joined on or after ${formatDateIN(f.from)}`);
   else if (f.to) parts.push(`who joined on or before ${formatDateIN(f.to)}`);
-  if (f.campaign) parts.push(f.campaign === NO_CAMPAIGN ? "with no campaign" : `from the "${f.campaign}" campaign`);
-  if (f.salon) parts.push(`whose first booking was at ${f.salon}`);
-  if (f.owner) parts.push(`owned by ${ownerName.get(f.owner) ?? "this agent"}`);
+  const names = (xs: string[]) => (xs.length <= 3 ? xs.join(", ") : xs.slice(0, 3).join(", ") + ` and ${xs.length - 3} more`);
+  if (f.campaign.length) parts.push("from " + names(f.campaign.map((c) => (c === NO_CAMPAIGN ? "no campaign" : `"${c}"`))));
+  if (f.salon.length) parts.push("whose first booking was at " + names(f.salon));
+  if (f.owner.length) parts.push("owned by " + names(f.owner.map((o) => ownerName.get(o) ?? "unknown agent")));
   return parts.length ? " " + parts.join(", ") : " (all time, all campaigns, salons and agents)";
 }
 
@@ -509,7 +516,7 @@ function RateBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function CampaignTable({ rows, selected, hrefFor }: { rows: (Summary & { key: string })[]; selected?: string; hrefFor: (key: string) => string }) {
+function CampaignTable({ rows, selected, hrefFor }: { rows: (Summary & { key: string })[]; selected: string[]; hrefFor: (key: string) => string }) {
   if (rows.length === 0) return <p className="text-sm text-slate-400">No leads match these filters.</p>;
   const maxLeads = Math.max(1, ...rows.map((r) => r.leads));
   return (
@@ -532,14 +539,14 @@ function CampaignTable({ rows, selected, hrefFor }: { rows: (Summary & { key: st
           {rows.map((r) => {
             const booked = pct(r.booked, r.leads);
             const back = pct(r.eligibleReturned, r.eligible);
-            const isSel = selected === r.key;
+            const isSel = selected.includes(r.key);
             return (
               <tr key={r.key} className={isSel ? "bg-blue-50" : "hover:bg-slate-50"}>
                 <td className="px-2 py-2.5">
                   <Link href={hrefFor(r.key)} className={"font-medium hover:underline " + (r.key === NO_CAMPAIGN ? "text-slate-500" : "text-blue-700")}>
                     {r.key === NO_CAMPAIGN ? "No campaign" : r.key}
                   </Link>
-                  {isSel && <span className="ml-2 text-[11px] text-blue-600">(filtered - click to clear)</span>}
+                  {isSel && <span className="ml-2 text-[11px] text-blue-600">(selected)</span>}
                 </td>
                 <td className="px-2 py-2.5">
                   <div className="flex items-center gap-2">

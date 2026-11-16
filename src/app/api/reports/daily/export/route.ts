@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import * as XLSX from "xlsx";
 import { getRemarkActivity } from "@/lib/followups";
-import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
+import { formatDateIN, formatTimeIN, todayIsoIST, istDayRange } from "@/lib/formatDate";
 
 export const maxDuration = 30;
 
@@ -15,15 +15,13 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const dateParam = searchParams.get("date");
   const dateStr = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayIsoIST();
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  const { start: dayStart, end: dayEnd } = istDayRange(dateStr);
 
   // Agents can only ever export their own customers, regardless of what they pass.
-  const ownerId = isAdmin ? searchParams.get("ownerId") || null : session.user.id;
+  const ownerId = isAdmin ? searchParams.getAll("ownerId").filter(Boolean) : session.user.id;
+  const remarks = searchParams.getAll("remark").filter(Boolean);
 
-  const rows = await getRemarkActivity({ ownerId }, { start: dayStart, end: dayEnd });
+  const rows = await getRemarkActivity({ ownerId, remarks }, { start: dayStart, end: dayEnd });
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(

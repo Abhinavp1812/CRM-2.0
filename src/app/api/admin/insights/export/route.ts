@@ -22,6 +22,7 @@ import {
   type Summary,
 } from "@/lib/insights";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { oneParam, searchParamsToRecord } from "@/lib/params";
 
 export const maxDuration = 60;
 
@@ -96,13 +97,14 @@ export async function GET(req: Request) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
   }
 
-  const sp = Object.fromEntries(new URL(req.url).searchParams);
+  const raw = searchParamsToRecord(new URL(req.url).searchParams);
+  const sp = Object.fromEntries(["list", "reason", "temp", "rsalon", "rcoupon"].map((k) => [k, oneParam(raw[k])]));
   const list = sp.list || "report";
   if (list !== "report" && !isListKey(list)) {
     return new Response(JSON.stringify({ error: "Unknown list" }), { status: 400 });
   }
 
-  const filters = parseFilters(sp);
+  const filters = parseFilters(raw);
   const { now, leads: allLeads } = await loadInsights();
   const leads = applyFilters(allLeads, filters);
   const ownerName = new Map(allLeads.map((l) => [l.ownerKey, l.ownerName]));
@@ -114,9 +116,9 @@ export async function GET(req: Request) {
     addSheet(wb, "Summary", [
       { Item: "Joined from", Value: filters.from ? formatDateIN(filters.from) : "Any" },
       { Item: "Joined to", Value: filters.to ? formatDateIN(filters.to) : "Any" },
-      { Item: "Campaign", Value: filters.campaign ?? "All" },
-      { Item: "First booked at salon", Value: filters.salon ?? "All" },
-      { Item: "Agent", Value: filters.owner ? ownerName.get(filters.owner) ?? filters.owner : "All" },
+      { Item: "Campaign", Value: filters.campaign.length ? filters.campaign.map((c) => (c === NO_CAMPAIGN ? "No campaign" : c)).join(", ") : "All" },
+      { Item: "First booked at salon", Value: filters.salon.length ? filters.salon.join(", ") : "All" },
+      { Item: "Agent", Value: filters.owner.length ? filters.owner.map((o) => ownerName.get(o) ?? o).join(", ") : "All" },
       { Item: "", Value: "" },
       { Item: "Leads", Value: s.leads },
       { Item: "Registered", Value: s.registered },

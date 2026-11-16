@@ -586,16 +586,18 @@ export interface RemarkActivityRow {
 }
 
 export async function getRemarkActivity(
-  scope: { ownerId: string | null },
+  scope: { ownerId: string | string[] | null; remarks?: string[] },
   range: { start: Date; end: Date }
 ): Promise<RemarkActivityRow[]> {
+  const owners = scope.ownerId === null ? [] : Array.isArray(scope.ownerId) ? scope.ownerId : [scope.ownerId];
   const rows = await prisma.activityLog.findMany({
     where: {
       activityType: "REMARK_ADDED",
       createdAt: { gte: range.start, lt: range.end },
+      ...(scope.remarks?.length ? { remark: { in: scope.remarks } } : {}),
       customer: {
         deletedAt: null,
-        ...(scope.ownerId ? { ownerId: scope.ownerId } : {}),
+        ...(owners.length ? { ownerId: { in: owners } } : {}),
       },
     },
     include: {
@@ -694,60 +696,69 @@ export interface AdminCustomerRow {
   hasFollowup: boolean;
 }
 
+/** Filter value meaning "has no owner" / "has no lead source". */
+export const NONE_VALUE = "__none__";
+
+export type FollowupStateFilter = "active" | "closed" | "dnc" | "contacted";
+
+/** Every list is "any of these"; an empty or missing list means no filter. */
 export interface AdminCustomerFilter {
   search?: string;
-  ownerId?: string;
-  customerType?: "NEW_REGISTRATION" | "CUSTOMER" | "all";
-  followupState?: "active" | "closed" | "dnc" | "contacted" | "all";
-  remark?: string;
-  leadTemperature?: "HOT" | "WARM" | "COLD";
-  leadSource?: string;
+  ownerId?: string[];
+  customerType?: ("NEW_REGISTRATION" | "CUSTOMER")[];
+  followupState?: FollowupStateFilter[];
+  remark?: string[];
+  leadTemperature?: ("HOT" | "WARM" | "COLD")[];
+  leadSource?: string[];
+}
+
+/** "Any of these values" on a nullable column, where NONE_VALUE stands for null. */
+function anyOf(field: string, values: string[]): Record<string, unknown> {
+  const real = values.filter((v) => v !== NONE_VALUE);
+  const clauses: Record<string, unknown>[] = [];
+  if (real.length) clauses.push({ [field]: { in: real } });
+  if (values.includes(NONE_VALUE)) clauses.push({ [field]: null });
+  return clauses.length === 1 ? clauses[0] : { OR: clauses };
 }
 
 export async function getAdminCustomers(filter: AdminCustomerFilter, page = 1, pageSize = 50) {
-  const where: Record<string, unknown> = { deletedAt: null };
+  // Each filter is its own AND clause. Keeping relation conditions (followup is /
+  // isNot) in separate objects avoids mixing them with scalar keys in one object,
+  // which Prisma rejects at runtime.
+  const and: Record<string, unknown>[] = [{ deletedAt: null }];
   if (filter.search && filter.search.trim().length >= 2) {
     const q = filter.search.trim();
-    const digitsOnly = q.replace(/\D/g, "");
-    where.OR = [
-      { name: { contains: q, mode: "insensitive" } },
-      ...(digitsOnly.length >= 4 ? [{ phone: { contains: digitsOnly } }] : []),
-      { customerIdExt: q },
-    ];
+    const digitsOnly = q.replace(/D/g, "");
+    and.push({
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        ...(digitsOnly.length >= 4 ? [{ phone: { contains: digitsOnly } }] : []),
+        { customerIdExt: q },
+      ],
+    });
   }
-  if (filter.ownerId) where.ownerId = filter.ownerId;
-  if (filter.leadSource) where.leadSource = filter.leadSource;
-  if (filter.customerType && filter.customerType !== "all") where.customerType = filter.customerType;
-  if (filter.followupState === "dnc") where.doNotContact = true;
-  if (filter.followupState === "closed") {
-    // A closed customer has no Followup row at all, so a remark/temperature filter
-    // (both live on Followup) can never apply here - closed wins outright.
-    where.doNotContact = false;
-    where.followup = null;
-  } else {
-    // Every other branch narrows the *same* to-one relation, so all its conditions
-    // must land in one flat object passed via `is` - mixing `isNot`/`is` relation
-    // keys with plain scalar keys in the same object is invalid and throws at
-    // runtime (that was the actual bug: `{ isNot: null, leadTemperature: ... }`).
-    const followupScalar: Record<string, unknown> = {};
-    let requireFollowup = false;
-    if (filter.followupState === "active") {
-      where.doNotContact = false;
-      requireFollowup = true;
-    } else if (filter.followupState === "contacted") {
+  if (filter.ownerId?.length) and.push(anyOf("ownerId", filter.ownerId));
+  if (filter.leadSource?.length) and.push(anyOf("leadSource", filter.leadSource));
+  if (filter.customerType?.length) and.push({ customerType: { in: filter.customerType } });
+  if (filter.followupState?.length) {
+    const byState: Record<FollowupStateFilter, Record<string, unknown>> = {
+      active: { doNotContact: false, followup: { isNot: null } },
+      // A closed customer has no Followup row at all.
+      closed: { doNotContact: false, followup: null },
+      dnc: { doNotContact: true },
       // Lifetime, matches the "Called" / "Booked" counts on Team Stats exactly:
-      // every customer this agent has EVER actually reached, read straight from
-      // the activity log - not Followup.lastContactedAt, which disappears the
-      // moment a remark closes the followup (Not Interested, Converted, DNC, ...)
-      // and deletes the Followup row entirely. Deliberately not restricted to
-      // doNotContact: false either, for the same reason: a customer who was
-      // contacted and only later went DNC was still genuinely reached.
-      where.activities = { some: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] } } };
-    }
-    if (filter.remark) { followupScalar.currentRemark = filter.remark; requireFollowup = true; }
-    if (filter.leadTemperature) { followupScalar.leadTemperature = filter.leadTemperature; requireFollowup = true; }
-    if (requireFollowup) where.followup = { is: followupScalar };
+      // every customer EVER actually reached, read straight from the activity log
+      // - not Followup.lastContactedAt, which disappears when a remark closes the
+      // followup. Not restricted to doNotContact: false, for the same reason.
+      contacted: { activities: { some: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] } } } },
+    };
+    and.push({ OR: filter.followupState.map((st) => byState[st]) });
   }
+  // Remark and temperature live on the Followup row, so these only match
+  // customers with an open followup.
+  if (filter.remark?.length) and.push({ followup: { is: { currentRemark: { in: filter.remark } } } });
+  if (filter.leadTemperature?.length) and.push({ followup: { is: { leadTemperature: { in: filter.leadTemperature } } } });
+  const where = { AND: and };
 
   const [customers, total] = await Promise.all([
     prisma.customer.findMany({
