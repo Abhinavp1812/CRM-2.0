@@ -4,7 +4,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { formatPhone, whatsappLink, telLink, getActiveRemarkOptions, getActiveLeadSources } from "@/lib/followups";
 import { CustomerTypeBadge, LeadTemperatureBadge } from "@/components/StatusBadge";
-import TopNav from "@/components/TopNav";
+import Layout from "@/components/Layout";
+import SearchBar from "@/components/SearchBar";
 import FollowupEditButton from "@/components/FollowupEditButton";
 import LogCallButton from "@/components/LogCallButton";
 import UnflagDncButton from "@/components/UnflagDncButton";
@@ -62,15 +63,16 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const waMessage = "Hi " + (customer.name ?? "") + ", this is from Style Lounge.";
 
   return (
-    <>
-      <TopNav />
-      <main className="min-h-screen bg-slate-50 py-4 md:py-8">
-        <div className="max-w-5xl mx-auto px-4">
+    <Layout>
+        <div className="max-w-5xl mx-auto">
 
-          {/* Back link */}
-          <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800 transition-colors mb-4">
-            ← Back to followups
-          </Link>
+          {/* Back link + search */}
+          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+            <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800 transition-colors">
+              ← Back to followups
+            </Link>
+            <SearchBar />
+          </div>
 
           {/* DNC banner */}
           {customer.doNotContact && (
@@ -196,8 +198,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
           </div>
 
         </div>
-      </main>
-    </>
+    </Layout>
   );
 }
 
