@@ -139,7 +139,7 @@ export default async function TrackerPage({
           activeClass="bg-emerald-50 border-emerald-300"
           label="Bookings"
           value={counts.bookings}
-          note={`${fromStr} to ${toStr}`}
+          note={`${fromStr} to ${toStr} · paid only (Success / Partially Paid)`}
         />
       </div>
 

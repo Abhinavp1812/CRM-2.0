@@ -57,9 +57,14 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     ? toLocalIso(new Date(customer.followup.nextFollowupDate))
     : toLocalIso(new Date());
 
-  const lastBooking = customer.bookings[0];
-  const completedBookings = customer.bookings.filter((b) => b.status === "Completed");
-  const totalSpend = completedBookings.reduce((sum, b) => sum + (b.grandTotal ? Number(b.grandTotal) : 0), 0);
+  // Only paid bookings count (payment Success / Partially Paid, not cancelled) - the
+  // same rule as Followups and Insights. Failed / unpaid orders are listed apart.
+  const isPaid = (b: { paymentStatus: string | null; status: string | null }) =>
+    (b.paymentStatus === "Success" || b.paymentStatus === "Partially Paid") && b.status !== "Cancelled";
+  const paidBookings = customer.bookings.filter(isPaid);
+  const unpaidBookings = customer.bookings.filter((b) => !isPaid(b));
+  const lastBooking = paidBookings[0];
+  const totalSpend = paidBookings.reduce((sum, b) => sum + (b.grandTotal ? Number(b.grandTotal) : 0), 0);
   const waMessage = "Hi " + (customer.name ?? "") + ", this is from Style Lounge.";
 
   return (
@@ -154,7 +159,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Stat label="Next followup" value={customer.followup ? formatDateIN(customer.followup.nextFollowupDate) : "—"} />
             <Stat label="Last contact" value={customer.followup?.lastContactedAt ? formatDateIN(customer.followup.lastContactedAt) : "Never"} />
-            <Stat label="Bookings" value={customer.bookings.length.toString()} />
+            <Stat label="Bookings" value={paidBookings.length.toString()} />
             <Stat label="Lifetime spend" value={totalSpend > 0 ? "₹" + Math.round(totalSpend).toLocaleString("en-IN") : "—"} />
           </div>
 
@@ -191,7 +196,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
             <Tabs
               tabs={[
                 { id: "timeline", label: "Timeline", count: customer.activities.length, content: <Timeline activities={customer.activities} /> },
-                { id: "bookings", label: "Bookings", count: customer.bookings.length, content: <BookingsTable bookings={customer.bookings} /> },
+                { id: "bookings", label: "Bookings", count: paidBookings.length, content: <BookingsSection paid={paidBookings} unpaid={unpaidBookings} /> },
                 { id: "registrations", label: "Registrations", count: customer.registrations.length, content: <RegistrationsTable registrations={customer.registrations} /> },
               ]}
             />
@@ -277,8 +282,25 @@ type Booking = {
   salon: { name: string; city: string | null } | null;
 };
 
+function BookingsSection({ paid, unpaid }: { paid: Booking[]; unpaid: Booking[] }) {
+  return (
+    <>
+      {paid.length === 0 ? <p className="text-sm text-slate-400 py-4">No paid bookings yet.</p> : <BookingsTable bookings={paid} />}
+      {unpaid.length > 0 && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-800">
+            {unpaid.length} unpaid order{unpaid.length === 1 ? "" : "s"} (failed / cancelled / pending payment) - not counted
+          </summary>
+          <div className="mt-2 opacity-70">
+            <BookingsTable bookings={unpaid} />
+          </div>
+        </details>
+      )}
+    </>
+  );
+}
+
 function BookingsTable({ bookings }: { bookings: Booking[] }) {
-  if (bookings.length === 0) return <p className="text-sm text-slate-400 py-4">No bookings yet.</p>;
   return (
     <div className="overflow-x-auto -mx-1">
       <table className="w-full text-sm min-w-[480px]">

@@ -17,6 +17,12 @@ export interface TrackerRange {
   to: Date;
 }
 
+/** Only paid bookings count: payment Success / Partially Paid and not cancelled (failed orders are ignored). */
+const PAID_BOOKING = {
+  paymentStatus: { in: ["Success", "Partially Paid"] },
+  NOT: { status: "Cancelled" },
+};
+
 export interface TrackerCounts {
   registrations: number;
   bookings: number;
@@ -28,7 +34,7 @@ export async function getTrackerCounts(range: TrackerRange): Promise<TrackerCoun
       where: { onboardingDate: { gte: range.from, lt: range.to }, customer: { deletedAt: null } },
     }),
     prisma.booking.count({
-      where: { orderDate: { gte: range.from, lt: range.to }, customer: { deletedAt: null } },
+      where: { orderDate: { gte: range.from, lt: range.to }, customer: { deletedAt: null }, ...PAID_BOOKING },
     }),
   ]);
   return { registrations, bookings };
@@ -102,7 +108,7 @@ export async function getTrackerBookings(
   page = 1,
   pageSize = 50
 ): Promise<{ rows: TrackerBookingRow[]; total: number }> {
-  const where = { orderDate: { gte: range.from, lt: range.to }, customer: { deletedAt: null } };
+  const where = { orderDate: { gte: range.from, lt: range.to }, customer: { deletedAt: null }, ...PAID_BOOKING };
   const [rows, total] = await Promise.all([
     prisma.booking.findMany({
       where,

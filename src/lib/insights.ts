@@ -1,60 +1,89 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Admin > Insights: why customers stop booking.
+ * Admin > Insights: what happened to every lead, which campaigns work, and why
+ * customers don't book (again).
  *
- * Everything is derived from bookings + the team's call/remark history, loaded
- * once per request and computed in memory (a few thousand bookings), so every
- * chart, drill-down list and Excel export works from the same per-customer facts
- * and can never disagree with each other.
+ * Every customer in the CRM (a "lead") is loaded once per request together with
+ * their bookings and the team's call/remark history, and reduced to one
+ * `LeadFacts` row. Every number, chart, drill-down list and Excel sheet is then
+ * counted from those same rows, so they can never disagree with each other.
  *
- * A "paid" booking is payment Success / Partially Paid and not cancelled - the
- * same rule as Team Stats and the Tracker. A booking's date is its orderDate.
+ * Rules (the same everywhere in the app):
+ * - A booking only counts when its payment is Success or Partially Paid and it
+ *   isn't cancelled. Failed / pending-payment orders never count as bookings.
+ * - A booking's date is its orderDate (bookingDate when missing).
+ * - A "visit" is one booking day: several orders on the same day are one visit.
+ * - "Contacted" means the team logged a call or a remark on the customer.
  */
 
 const DAY = 86_400_000;
+const IST_OFFSET = 330 * 60_000;
 
-/** A customer who has gone quiet: no paid booking for 3x their usual gap, and at least this many days. */
-export const MIN_SILENT_DAYS = 30;
+/** A customer who came back has "stopped" after this many times their usual gap, and at least MIN_SILENT_DAYS. */
 const SILENT_GAP_MULTIPLE = 3;
-/** One-time bookers only count as "never came back" once they've had this long to return. */
-export const ONE_TIME_GRACE_DAYS = 30;
+export const MIN_SILENT_DAYS = 30;
+/** Someone who booked once only counts as "didn't come back" after this many days. */
+export const GRACE_DAYS = 30;
 
-// Coupon use is deliberately not a signal: ~70% of regulars who are still booking
-// only use coupons too, so it doesn't explain why anyone stopped.
-export const SIGNALS = [
-  { key: "not_called", label: "Nobody from our team called them after their last booking" },
-  { key: "bad_experience", label: "Their latest order was cancelled or refunded" },
-  { key: "payment_failed", label: "Tried to book again, but the payment failed" },
-  { key: "not_interested", label: "Told our team they're not interested" },
-  { key: "location", label: "Told our team it's a location issue" },
-  { key: "unreachable", label: "Our team tried but couldn't reach them" },
+export const NO_CAMPAIGN = "(no campaign)";
+export const NO_SALON = "(unknown salon)";
+export const NO_COUPON = "(no coupon)";
+export const NO_OWNER = "(unassigned)";
+
+// ---------- Outcomes: every lead is in exactly one ----------
+
+export const OUTCOMES = [
+  { key: "not_contacted", label: "Not contacted yet", short: "Not contacted", group: "notbooked", color: "bg-slate-300", text: "text-slate-600" },
+  { key: "contacted", label: "Contacted, hasn't booked", short: "Contacted, no booking", group: "notbooked", color: "bg-slate-500", text: "text-slate-700" },
+  { key: "payment_failed", label: "Tried to book, payment failed", short: "Payment failed", group: "notbooked", color: "bg-amber-400", text: "text-amber-700" },
+  { key: "once_recent", label: `Booked once, less than ${GRACE_DAYS} days ago`, short: "Booked once (recent)", group: "booked", color: "bg-sky-300", text: "text-sky-700" },
+  { key: "once_gone", label: "Booked once, never came back", short: "Booked once, gone", group: "lapsed", color: "bg-orange-500", text: "text-orange-700" },
+  { key: "stopped", label: "Came back before, now stopped", short: "Came back, then stopped", group: "lapsed", color: "bg-red-500", text: "text-red-700" },
+  { key: "returning", label: "Coming back regularly", short: "Coming back", group: "booked", color: "bg-emerald-500", text: "text-emerald-700" },
 ] as const;
-export type SignalKey = (typeof SIGNALS)[number]["key"];
+export type OutcomeKey = (typeof OUTCOMES)[number]["key"];
+export const outcomeOf = (k: string) => OUTCOMES.find((o) => o.key === k);
 
-export interface CustomerFacts {
-  id: string;
-  name: string | null;
-  phone: string;
-  city: string | null;
-  ownerName: string | null;
-  /** Separate booking days (several orders on one day count as one visit). */
-  visits: number;
-  /** Paid orders, including multiple on the same day. */
-  orders: number;
-  revenue: number;
-  firstPaidAt: Date;
-  lastPaidAt: Date;
-  /** Typical days between this customer's paid bookings; null with fewer than 2. */
-  usualGapDays: number | null;
-  daysSinceLast: number;
-  firstCoupon: string | null;
-  firstSalon: string | null;
-  lastSalon: string | null;
-  /** The team's most recent note on this customer from any time, with who wrote it and when. */
-  latestNote: LatestNote | null;
-  signals: SignalKey[];
-}
+export const OUTCOME_HELP: Record<OutcomeKey, string> = {
+  not_contacted: "Never booked, and nobody from the team has logged a call or remark on them.",
+  contacted: "The team has called or left a remark, but they haven't made a paid booking (and no failed payment).",
+  payment_failed: "Tried to book but the payment failed, and they never made a paid booking (called or not).",
+  once_recent: `One paid visit, less than ${GRACE_DAYS} days ago - too early to say if they'll return.`,
+  once_gone: `One paid visit, ${GRACE_DAYS}+ days ago, and no second visit.`,
+  stopped: `2+ visits, but now silent for over ${SILENT_GAP_MULTIPLE}x their usual gap (at least ${MIN_SILENT_DAYS} days).`,
+  returning: "2+ visits and still within their usual rhythm.",
+};
+
+// ---------- Reasons (why not booking / why not back), one per lead ----------
+
+/**
+ * For leads who haven't booked and customers who stopped, the most informative
+ * thing we know - in this order:
+ *   1. the team's latest remark (after their last visit, for customers who booked)
+ *   2. called, but no remark recorded
+ *   3. tried to book again but the payment failed (not called)
+ *   4. their latest order was cancelled/refunded (not called)
+ *   5. nobody has called them
+ * Remark-based reasons are keyed "remark:<label>".
+ */
+export const FIXED_REASONS: Record<string, string> = {
+  called_no_remark: "Called, but no remark recorded",
+  failed_not_called: "Payment failed - nobody called them",
+  cancelled_not_called: "Order cancelled/refunded - nobody called them",
+  not_called_since: "Nobody called them after their last visit",
+  not_contacted: "Nobody has contacted them yet",
+};
+export const reasonLabel = (key: string) =>
+  key.startsWith("remark:") ? "Team's remark: " + key.slice(7) : FIXED_REASONS[key] ?? key;
+
+export type Temperature = "HOT" | "WARM" | "COLD";
+export const TEMPERATURES: { key: Temperature | "none"; label: string; color: string }[] = [
+  { key: "HOT", label: "Hot", color: "bg-red-500" },
+  { key: "WARM", label: "Warm", color: "bg-amber-400" },
+  { key: "COLD", label: "Cold", color: "bg-sky-400" },
+  { key: "none", label: "Not set", color: "bg-slate-300" },
+];
 
 export interface LatestNote {
   text: string;
@@ -63,21 +92,48 @@ export interface LatestNote {
   by: string | null;
 }
 
-export interface FailedPaymentRow {
+export interface LeadFacts {
   id: string;
   name: string | null;
   phone: string;
   city: string | null;
-  ownerName: string | null;
-  failedOrders: number;
-  lastTriedAt: Date;
+  ownerKey: string;
+  ownerName: string;
+  campaign: string;
+  registered: boolean;
+  /** When we first saw them: registration date or first order, whichever is earlier. */
+  joinedAt: Date;
+  joinedDay: string;
+  contacted: boolean;
+  lastContactAt: Date | null;
+  doNotContact: boolean;
+
+  /** Separate paid booking days. */
+  visits: number;
+  /** Paid orders, including several on one day. */
+  orders: number;
+  revenue: number;
+  firstPaidAt: Date | null;
+  lastPaidAt: Date | null;
+  /** Median days between visits; null with fewer than 2 visits. */
+  usualGapDays: number | null;
+  daysSinceLast: number | null;
+  firstSalon: string | null;
   lastSalon: string | null;
-  contactedSince: boolean;
+  firstCoupon: string | null;
+  failedOrders: number;
+  /** Paid orders as [date, isFirstVisit] for the weekly chart. */
+  paidOrders: { d: Date; first: boolean }[];
+
+  temperature: Temperature | null;
+  latestRemark: { label: string; at: Date; by: string | null } | null;
   latestNote: LatestNote | null;
+  outcome: OutcomeKey;
+  /** Only for not-booked and lapsed leads (see FIXED_REASONS). */
+  reason: string | null;
 }
 
-type BookingLite = {
-  customerId: string;
+export type BookingLite = {
   d: Date;
   createdAt: Date;
   status: string | null;
@@ -86,24 +142,21 @@ type BookingLite = {
   coupon: string | null;
   salon: string | null;
 };
+export type ActLite = {
+  activityType: string;
+  remark: string | null;
+  note: string | null;
+  leadTemperature: Temperature | null;
+  createdAt: Date;
+  user: { name: string } | null;
+};
 
 const isPaid = (b: BookingLite) =>
   (b.paymentStatus === "Success" || b.paymentStatus === "Partially Paid") && b.status !== "Cancelled";
-const isBad = (b: BookingLite) => b.status === "Cancelled" || b.paymentStatus === "Refunded";
+const isCancelled = (b: BookingLite) => b.status === "Cancelled" || b.paymentStatus === "Refunded";
 
-/** Latest call/remark that carries a written note (acts are oldest-first). */
-function latestNoteOf(
-  acts: { remark: string | null; note: string | null; createdAt: Date; user: { name: string } | null }[]
-): LatestNote | null {
-  for (let i = acts.length - 1; i >= 0; i--) {
-    const note = acts[i].note?.trim();
-    if (note) return { text: note, remark: acts[i].remark, at: acts[i].createdAt, by: acts[i].user?.name ?? null };
-  }
-  return null;
-}
-
-/** orderDate is stored as a UTC-midnight calendar date, so its ISO date is the booking day. */
-const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+/** Calendar day in India (date-only columns are stored at UTC midnight, which maps to the same day). */
+export const dayKey = (d: Date) => new Date(d.getTime() + IST_OFFSET).toISOString().slice(0, 10);
 
 function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
@@ -112,20 +165,147 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+function latestNoteOf(acts: ActLite[]): LatestNote | null {
+  for (let i = acts.length - 1; i >= 0; i--) {
+    const text = acts[i].note?.trim();
+    if (text) return { text, remark: acts[i].remark, at: acts[i].createdAt, by: acts[i].user?.name ?? null };
+  }
+  return null;
+}
+
+function lastWithRemark(acts: ActLite[]) {
+  for (let i = acts.length - 1; i >= 0; i--) if (acts[i].remark) return acts[i];
+  return null;
+}
+
+
+export interface CustomerLite {
+  id: string;
+  name: string | null;
+  phone: string;
+  city: string | null;
+  leadSource: string | null;
+  doNotContact: boolean;
+  firstSeenAt: Date;
+  ownerId: string | null;
+  owner: { name: string } | null;
+  followup: { leadTemperature: Temperature | null } | null;
+  /** Earliest registration date, and whether they have any registration at all. */
+  regDate: Date | null;
+  registered: boolean;
+}
+
+/** Reduce one customer + their bookings + calls/remarks (oldest first) to a LeadFacts row. Pure - no DB. */
+export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLite[], now: Date): LeadFacts {
+  const list = [...bookings].sort((a, b) => a.d.getTime() - b.d.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
+  const paid = list.filter(isPaid);
+
+  // Joined = earliest of registration date and first order of any kind; fall back
+  // to when the CRM first saw them.
+  const candidates = [c.regDate, list[0]?.d].filter((d): d is Date => !!d);
+  const joinedAt = candidates.length ? new Date(Math.min(...candidates.map((d) => d.getTime()))) : c.firstSeenAt;
+
+  const visitDays = Array.from(new Set(paid.map((b) => dayKey(b.d))));
+  const gaps: number[] = [];
+  for (let i = 1; i < visitDays.length; i++) {
+    gaps.push((Date.parse(visitDays[i]) - Date.parse(visitDays[i - 1])) / DAY);
+  }
+  const usualGapDays = median(gaps);
+  const first = paid[0];
+  const last = paid[paid.length - 1];
+  const daysSinceLast = last ? Math.floor((now.getTime() - last.d.getTime()) / DAY) : null;
+
+  const failed = list.filter((b) => b.paymentStatus === "Failed");
+  const latestTemp = [...acts].reverse().find((a) => a.leadTemperature)?.leadTemperature ?? null;
+  const remarkAct = lastWithRemark(acts);
+
+  // ---- outcome ----
+  let outcome: OutcomeKey;
+  if (visitDays.length === 0) {
+    // A failed payment is the strongest sign of intent, so it wins over "contacted".
+    outcome = failed.length > 0 ? "payment_failed" : acts.length > 0 ? "contacted" : "not_contacted";
+  } else if (visitDays.length === 1) {
+    outcome = daysSinceLast! < GRACE_DAYS ? "once_recent" : "once_gone";
+  } else {
+    const silentLimit = Math.max(SILENT_GAP_MULTIPLE * (usualGapDays ?? 0), MIN_SILENT_DAYS);
+    outcome = daysSinceLast! > silentLimit ? "stopped" : "returning";
+  }
+  // ---- reason ----
+  let reason: string | null = null;
+  if (visitDays.length === 0) {
+    if (remarkAct) reason = "remark:" + remarkAct.remark;
+    else if (acts.length > 0) reason = "called_no_remark";
+    else if (failed.length > 0) reason = "failed_not_called";
+    else reason = "not_contacted";
+  } else if (outcome === "once_gone" || outcome === "stopped") {
+    const actsAfter = acts.filter((a) => a.createdAt >= last.d);
+    const remarkAfter = lastWithRemark(actsAfter);
+    const latestOrder = list[list.length - 1];
+    if (remarkAfter) reason = "remark:" + remarkAfter.remark;
+    else if (actsAfter.length > 0) reason = "called_no_remark";
+    else if (failed.some((b) => b.d > last.d)) reason = "failed_not_called";
+    else if (isCancelled(latestOrder) && latestOrder.d >= last.d) reason = "cancelled_not_called";
+    else reason = "not_called_since";
+  }
+
+  const firstVisitDay = visitDays[0];
+  return {
+    id: c.id,
+    name: c.name,
+    phone: c.phone,
+    city: c.city,
+    ownerKey: c.ownerId ?? NO_OWNER,
+    ownerName: c.owner?.name ?? NO_OWNER,
+    campaign: c.leadSource?.trim() || NO_CAMPAIGN,
+    registered: c.registered,
+    joinedAt,
+    joinedDay: dayKey(joinedAt),
+    contacted: acts.length > 0,
+    lastContactAt: acts.length ? acts[acts.length - 1].createdAt : null,
+    doNotContact: c.doNotContact,
+    visits: visitDays.length,
+    orders: paid.length,
+    revenue: paid.reduce((s, b) => s + b.grandTotal, 0),
+    firstPaidAt: first?.d ?? null,
+    lastPaidAt: last?.d ?? null,
+    usualGapDays,
+    daysSinceLast,
+    firstSalon: first ? first.salon ?? NO_SALON : null,
+    lastSalon: last ? last.salon ?? NO_SALON : null,
+    firstCoupon: first ? first.coupon ?? NO_COUPON : null,
+    failedOrders: failed.length,
+    paidOrders: paid.map((b) => ({ d: b.d, first: dayKey(b.d) === firstVisitDay })),
+    temperature: c.followup?.leadTemperature ?? latestTemp,
+    latestRemark: remarkAct ? { label: remarkAct.remark!, at: remarkAct.createdAt, by: remarkAct.user?.name ?? null } : null,
+    latestNote: latestNoteOf(acts),
+    outcome,
+    reason,
+  };
+}
+
 export interface InsightsData {
   now: Date;
-  facts: CustomerFacts[];
-  failedNeverPaid: FailedPaymentRow[];
-  registeredCount: number;
-  contactedCount: number;
-  /** Every paid booking with whether it was that customer's first, for the trend chart. */
-  paidBookings: { d: Date; isFirst: boolean }[];
-  registrationsByDay: Date[];
+  leads: LeadFacts[];
 }
 
 export async function loadInsights(): Promise<InsightsData> {
   const now = new Date();
-  const [rawBookings, activities, registeredCount, recentRegs] = await Promise.all([
+  const [customers, rawBookings, activities, regDates] = await Promise.all([
+    prisma.customer.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        city: true,
+        leadSource: true,
+        doNotContact: true,
+        firstSeenAt: true,
+        ownerId: true,
+        owner: { select: { name: true } },
+        followup: { select: { leadTemperature: true } },
+      },
+    }),
     prisma.booking.findMany({
       where: { customer: { deletedAt: null } },
       select: {
@@ -143,224 +323,242 @@ export async function loadInsights(): Promise<InsightsData> {
     }),
     prisma.activityLog.findMany({
       where: { activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, customer: { deletedAt: null } },
-      select: { customerId: true, activityType: true, remark: true, note: true, createdAt: true, user: { select: { name: true } } },
+      select: {
+        customerId: true,
+        activityType: true,
+        remark: true,
+        note: true,
+        leadTemperature: true,
+        createdAt: true,
+        user: { select: { name: true } },
+      },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.customer.count({ where: { deletedAt: null, registrations: { some: {} } } }),
-    prisma.registration.findMany({
-      where: { onboardingDate: { gte: new Date(now.getTime() - 120 * DAY) }, customer: { deletedAt: null } },
-      select: { onboardingDate: true },
-    }),
+    prisma.registration.groupBy({ by: ["customerId"], _min: { onboardingDate: true }, _count: { _all: true } }),
   ]);
 
-  const bookings: BookingLite[] = rawBookings
-    .filter((b) => b.orderDate || b.bookingDate)
-    .map((b) => ({
-      customerId: b.customerId,
-      d: (b.orderDate ?? b.bookingDate)!,
+  const bookingsBy = new Map<string, BookingLite[]>();
+  for (const b of rawBookings) {
+    const d = b.orderDate ?? b.bookingDate;
+    if (!d) continue;
+    const lite: BookingLite = {
+      d,
       createdAt: b.createdAt,
       status: b.status,
       paymentStatus: b.paymentStatus,
       grandTotal: b.grandTotal ? Number(b.grandTotal) : 0,
-      coupon: b.styleLoungeCoupon,
+      coupon: b.styleLoungeCoupon?.trim() || null,
       salon: b.salon?.name || b.salonNameSnapshot || null,
-    }));
-
-  const byCustomer = new Map<string, BookingLite[]>();
-  for (const b of bookings) {
-    const list = byCustomer.get(b.customerId);
-    if (list) list.push(b);
-    else byCustomer.set(b.customerId, [b]);
+    };
+    const list = bookingsBy.get(b.customerId);
+    if (list) list.push(lite);
+    else bookingsBy.set(b.customerId, [lite]);
   }
 
-  const actsByCustomer = new Map<string, typeof activities>();
+  const actsBy = new Map<string, ActLite[]>();
   for (const a of activities) {
-    const list = actsByCustomer.get(a.customerId);
+    const list = actsBy.get(a.customerId);
     if (list) list.push(a);
-    else actsByCustomer.set(a.customerId, [a]);
-  }
-  const contactedCount = actsByCustomer.size;
-
-  const customers = await prisma.customer.findMany({
-    where: { id: { in: Array.from(byCustomer.keys()) }, deletedAt: null },
-    select: { id: true, name: true, phone: true, city: true, owner: { select: { name: true } } },
-  });
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-
-  const facts: CustomerFacts[] = [];
-  const failedNeverPaid: FailedPaymentRow[] = [];
-  const paidBookings: { d: Date; isFirst: boolean }[] = [];
-
-  for (const [customerId, list] of byCustomer) {
-    const c = customerById.get(customerId);
-    if (!c) continue;
-    list.sort((a, b) => a.d.getTime() - b.d.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
-    const paid = list.filter(isPaid);
-    const acts = actsByCustomer.get(customerId) ?? [];
-
-    if (paid.length === 0) {
-      const failed = list.filter((b) => b.paymentStatus === "Failed");
-      if (failed.length > 0) {
-        const lastTried = failed[failed.length - 1];
-        failedNeverPaid.push({
-          id: c.id,
-          name: c.name,
-          phone: c.phone,
-          city: c.city,
-          ownerName: c.owner?.name ?? null,
-          failedOrders: failed.length,
-          lastTriedAt: lastTried.d,
-          lastSalon: lastTried.salon,
-          contactedSince: acts.some((a) => a.createdAt >= lastTried.d),
-          latestNote: latestNoteOf(acts),
-        });
-      }
-      continue;
-    }
-
-    // A visit is one booking day: customers often place several orders on the same
-    // day (one per service), and counting those as repeat bookings made a single
-    // trip look like a "regular" with a 0-day gap.
-    const visitDays = Array.from(new Set(paid.map((b) => dayKey(b.d))));
-    const firstDay = visitDays[0];
-    paid.forEach((b) => paidBookings.push({ d: b.d, isFirst: dayKey(b.d) === firstDay }));
-
-    const first = paid[0];
-    const last = paid[paid.length - 1];
-    const visitDates = visitDays.map((k) => new Date(k + "T00:00:00Z"));
-    const gaps: number[] = [];
-    for (let i = 1; i < visitDates.length; i++) gaps.push((visitDates[i].getTime() - visitDates[i - 1].getTime()) / DAY);
-    const usualGapDays = median(gaps);
-    const daysSinceLast = Math.floor((now.getTime() - last.d.getTime()) / DAY);
-
-    const latestOrder = list[list.length - 1];
-    const actsSince = acts.filter((a) => a.createdAt >= last.d);
-    const remarksSince = actsSince.filter((a) => a.activityType === "REMARK_ADDED");
-    const lastRemark = remarksSince[remarksSince.length - 1];
-
-    const signals: SignalKey[] = [];
-    if (actsSince.length === 0) signals.push("not_called");
-    if (isBad(latestOrder) && latestOrder.d >= last.d) signals.push("bad_experience");
-    if (list.some((b) => b.paymentStatus === "Failed" && b.d > last.d)) signals.push("payment_failed");
-    if (lastRemark?.remark === "Not Interested") signals.push("not_interested");
-    if (lastRemark?.remark === "Location Issue") signals.push("location");
-    if (lastRemark?.remark === "Not Connected") signals.push("unreachable");
-
-    facts.push({
-      id: c.id,
-      name: c.name,
-      phone: c.phone,
-      city: c.city,
-      ownerName: c.owner?.name ?? null,
-      visits: visitDays.length,
-      orders: paid.length,
-      revenue: paid.reduce((s, b) => s + b.grandTotal, 0),
-      firstPaidAt: first.d,
-      lastPaidAt: last.d,
-      usualGapDays,
-      daysSinceLast,
-      firstCoupon: first.coupon,
-      firstSalon: first.salon,
-      lastSalon: last.salon,
-      latestNote: latestNoteOf(acts),
-      signals,
-    });
+    else actsBy.set(a.customerId, [a]);
   }
 
+  const regBy = new Map(regDates.map((r) => [r.customerId, r._min.onboardingDate]));
+
+  const leads = customers.map((c) =>
+    buildLead(
+      { ...c, regDate: regBy.get(c.id) ?? null, registered: regBy.has(c.id) },
+      bookingsBy.get(c.id) ?? [],
+      actsBy.get(c.id) ?? [],
+      now
+    )
+  );
+
+  return { now, leads };
+}
+
+// ---------- Filters (top of the page) ----------
+
+export interface InsightFilters {
+  /** YYYY-MM-DD, inclusive - matched against the day the lead joined. */
+  from?: string;
+  to?: string;
+  campaign?: string;
+  /** Salon of their first paid visit. */
+  salon?: string;
+  /** ownerId, or NO_OWNER. */
+  owner?: string;
+}
+
+export function parseFilters(sp: Record<string, string | undefined>): InsightFilters {
+  const date = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
   return {
-    now,
-    facts,
-    failedNeverPaid,
-    registeredCount,
-    contactedCount,
-    paidBookings,
-    registrationsByDay: recentRegs.map((r) => r.onboardingDate!).filter(Boolean),
+    from: date(sp.from),
+    to: date(sp.to),
+    campaign: sp.campaign || undefined,
+    salon: sp.salon || undefined,
+    owner: sp.owner || undefined,
   };
 }
 
-// ---------- Segments ----------
-
-export const isStoppedRegular = (f: CustomerFacts) =>
-  f.visits >= 3 &&
-  f.daysSinceLast > Math.max(SILENT_GAP_MULTIPLE * (f.usualGapDays ?? 0), MIN_SILENT_DAYS);
-
-export const isGoneOneTimer = (f: CustomerFacts) => f.visits === 1 && f.daysSinceLast >= ONE_TIME_GRACE_DAYS;
-
-/** Customers who had a fair chance to come back (first paid booking at least the grace period ago). */
-export const hadTimeToReturn = (f: CustomerFacts, now: Date) =>
-  now.getTime() - f.firstPaidAt.getTime() >= ONE_TIME_GRACE_DAYS * DAY;
-
-export type ViewKey =
-  | "paying"
-  | "repeat"
-  | "regulars"
-  | "stopped"
-  | "onetime"
-  | "failed"
-  | "salon"
-  | "coupon";
-
-export const VIEW_TITLES: Record<ViewKey, string> = {
-  paying: "Customers who booked at least once",
-  repeat: "Customers who came back (2+ visits)",
-  regulars: "Regular customers (3+ visits)",
-  stopped: "Regular customers who stopped booking",
-  onetime: "Booked once and never came back",
-  failed: "Tried to book, payment failed, never paid",
-  salon: "Customers whose first booking was at this salon",
-  coupon: "Customers whose first booking used this coupon",
-};
-
-export const NO_COUPON = "(no coupon)";
-export const NO_SALON = "(unknown salon)";
-
-export function selectView(
-  data: InsightsData,
-  view: ViewKey,
-  opts: { signal?: string | null; salon?: string | null; coupon?: string | null }
-): { kind: "facts"; rows: CustomerFacts[] } | { kind: "failed"; rows: FailedPaymentRow[] } {
-  if (view === "failed") {
-    return { kind: "failed", rows: [...data.failedNeverPaid].sort((a, b) => b.lastTriedAt.getTime() - a.lastTriedAt.getTime()) };
-  }
-  let rows = data.facts;
-  if (view === "repeat") rows = rows.filter((f) => f.visits >= 2);
-  else if (view === "regulars") rows = rows.filter((f) => f.visits >= 3);
-  else if (view === "stopped") rows = rows.filter(isStoppedRegular);
-  else if (view === "onetime") rows = rows.filter(isGoneOneTimer);
-  else if (view === "salon") rows = rows.filter((f) => hadTimeToReturn(f, data.now) && (f.firstSalon ?? NO_SALON) === opts.salon);
-  else if (view === "coupon") rows = rows.filter((f) => hadTimeToReturn(f, data.now) && (f.firstCoupon ?? NO_COUPON) === opts.coupon);
-
-  if (opts.signal && (view === "stopped" || view === "onetime")) {
-    rows = opts.signal === "none" ? rows.filter((f) => f.signals.length === 0) : rows.filter((f) => f.signals.includes(opts.signal as SignalKey));
-  }
-
-  const sorted = [...rows].sort((a, b) =>
-    view === "stopped" || view === "regulars" ? b.visits - a.visits || a.daysSinceLast - b.daysSinceLast : b.lastPaidAt.getTime() - a.lastPaidAt.getTime()
+export function applyFilters(leads: LeadFacts[], f: InsightFilters, skip: (keyof InsightFilters)[] = []) {
+  const use = (k: keyof InsightFilters) => f[k] && !skip.includes(k);
+  return leads.filter(
+    (l) =>
+      (!use("from") || l.joinedDay >= f.from!) &&
+      (!use("to") || l.joinedDay <= f.to!) &&
+      (!use("campaign") || l.campaign === f.campaign) &&
+      (!use("salon") || l.firstSalon === f.salon) &&
+      (!use("owner") || l.ownerKey === f.owner)
   );
-  return { kind: "facts", rows: sorted };
 }
 
-// ---------- Aggregations for the charts ----------
+// ---------- Drill-down lists ----------
 
-export function signalCounts(rows: CustomerFacts[]) {
-  return [
-    ...SIGNALS.map((s) => ({ key: s.key as string, label: s.label, count: rows.filter((f) => f.signals.includes(s.key)).length })),
-    { key: "none", label: "No clear sign in our data", count: rows.filter((f) => f.signals.length === 0).length },
-  ];
+export const LIST_GROUPS = {
+  all: "All leads",
+  registered: "Leads who registered",
+  contacted_any: "Leads our team contacted",
+  booked: "Leads who booked (1+ paid visit)",
+  returned: "Customers who came back (2+ visits)",
+  regular: "Regular customers (3+ visits)",
+  notbooked: "Leads who haven't booked",
+  lapsed: "Customers who didn't come back or stopped",
+} as const;
+export type ListGroup = keyof typeof LIST_GROUPS;
+
+export interface ListQuery {
+  /** An OutcomeKey or a ListGroup. */
+  list: string;
+  reason?: string;
+  temp?: string;
+  /** Return-rate drill-downs: first salon / first coupon, only customers who had time to return. */
+  rsalon?: string;
+  rcoupon?: string;
 }
 
-export function returnRateBy(
-  data: InsightsData,
-  keyOf: (f: CustomerFacts) => string,
-  minCustomers: number
-) {
+export const hadTimeToReturn = (l: LeadFacts, now: Date) =>
+  !!l.firstPaidAt && now.getTime() - l.firstPaidAt.getTime() >= GRACE_DAYS * DAY;
+
+export function inGroup(l: LeadFacts, key: string): boolean {
+  switch (key) {
+    case "all": return true;
+    case "registered": return l.registered;
+    case "contacted_any": return l.contacted;
+    case "booked": return l.visits >= 1;
+    case "returned": return l.visits >= 2;
+    case "regular": return l.visits >= 3;
+    case "notbooked": return l.visits === 0;
+    case "lapsed": return l.outcome === "once_gone" || l.outcome === "stopped";
+    default: return l.outcome === key;
+  }
+}
+
+export const isListKey = (k: string) => k in LIST_GROUPS || OUTCOMES.some((o) => o.key === k);
+
+export function listTitle(q: ListQuery): string {
+  const parts: string[] = [LIST_GROUPS[q.list as ListGroup] ?? outcomeOf(q.list)?.label ?? q.list];
+  if (q.reason) parts.push(reasonLabel(q.reason));
+  if (q.temp) parts.push("Temperature: " + (TEMPERATURES.find((t) => t.key === q.temp)?.label ?? q.temp));
+  if (q.rsalon) parts.push("First salon: " + q.rsalon);
+  if (q.rcoupon) parts.push("First coupon: " + q.rcoupon);
+  return parts.join(" - ");
+}
+
+export function selectList(leads: LeadFacts[], q: ListQuery, now: Date): LeadFacts[] {
+  const rows = leads.filter(
+    (l) =>
+      inGroup(l, q.list) &&
+      (!q.reason || l.reason === q.reason) &&
+      (!q.temp || (l.temperature ?? "none") === q.temp) &&
+      (!q.rsalon || (l.firstSalon === q.rsalon && hadTimeToReturn(l, now))) &&
+      (!q.rcoupon || (l.firstCoupon === q.rcoupon && hadTimeToReturn(l, now)))
+  );
+  // Most valuable first: customers who booked, by visits then recency; then newest leads.
+  return rows.sort(
+    (a, b) =>
+      b.visits - a.visits ||
+      (b.lastPaidAt?.getTime() ?? 0) - (a.lastPaidAt?.getTime() ?? 0) ||
+      b.joinedAt.getTime() - a.joinedAt.getTime()
+  );
+}
+
+// ---------- Aggregations ----------
+
+export interface Summary {
+  leads: number;
+  registered: number;
+  contacted: number;
+  booked: number;
+  returned: number;
+  regular: number;
+  /** Booked 30+ days ago, so they had a fair chance to come back. */
+  eligible: number;
+  eligibleReturned: number;
+  orders: number;
+  revenue: number;
+  outcomes: Record<OutcomeKey, number>;
+}
+
+export function summarize(leads: LeadFacts[], now: Date): Summary {
+  const s: Summary = {
+    leads: leads.length,
+    registered: 0,
+    contacted: 0,
+    booked: 0,
+    returned: 0,
+    regular: 0,
+    eligible: 0,
+    eligibleReturned: 0,
+    orders: 0,
+    revenue: 0,
+    outcomes: Object.fromEntries(OUTCOMES.map((o) => [o.key, 0])) as Record<OutcomeKey, number>,
+  };
+  for (const l of leads) {
+    if (l.registered) s.registered++;
+    if (l.contacted) s.contacted++;
+    if (l.visits >= 1) s.booked++;
+    if (l.visits >= 2) s.returned++;
+    if (l.visits >= 3) s.regular++;
+    if (hadTimeToReturn(l, now)) {
+      s.eligible++;
+      if (l.visits >= 2) s.eligibleReturned++;
+    }
+    s.orders += l.orders;
+    s.revenue += l.revenue;
+    s.outcomes[l.outcome]++;
+  }
+  return s;
+}
+
+/** Per-group summaries (campaign, agent...), biggest first. */
+export function summarizeBy(leads: LeadFacts[], keyOf: (l: LeadFacts) => string, now: Date) {
+  const groups = new Map<string, LeadFacts[]>();
+  for (const l of leads) {
+    const k = keyOf(l);
+    const g = groups.get(k);
+    if (g) g.push(l);
+    else groups.set(k, [l]);
+  }
+  return Array.from(groups, ([key, ls]) => ({ key, ...summarize(ls, now) })).sort((a, b) => b.leads - a.leads);
+}
+
+/** How often each reason applies within a set of leads (reasons sum to the set size). */
+export function reasonCounts(leads: LeadFacts[]) {
+  const m = new Map<string, number>();
+  for (const l of leads) if (l.reason) m.set(l.reason, (m.get(l.reason) ?? 0) + 1);
+  return Array.from(m, ([key, count]) => ({ key, label: reasonLabel(key), count })).sort((a, b) => b.count - a.count);
+}
+
+/** Return rate by a key of the first visit, among customers who had time to come back. */
+export function returnRateBy(leads: LeadFacts[], keyOf: (l: LeadFacts) => string | null, minCustomers: number, now: Date) {
   const groups = new Map<string, { customers: number; returned: number }>();
-  for (const f of data.facts) {
-    if (!hadTimeToReturn(f, data.now)) continue;
-    const k = keyOf(f);
+  for (const l of leads) {
+    if (!hadTimeToReturn(l, now)) continue;
+    const k = keyOf(l);
+    if (!k) continue;
     const g = groups.get(k) ?? { customers: 0, returned: 0 };
     g.customers++;
-    if (f.visits >= 2) g.returned++;
+    if (l.visits >= 2) g.returned++;
     groups.set(k, g);
   }
   return Array.from(groups, ([key, g]) => ({ key, ...g, rate: g.customers ? g.returned / g.customers : 0 }))
@@ -368,28 +566,27 @@ export function returnRateBy(
     .sort((a, b) => b.customers - a.customers);
 }
 
-/** Last N weeks (Monday-start), paid bookings split into first-time vs repeat, plus registrations. */
-export function weeklyTrend(data: InsightsData, weeks: number) {
-  const monday = new Date(data.now);
-  monday.setUTCHours(0, 0, 0, 0);
-  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+/** Last N weeks (Monday start, India time): paid orders split first visit vs returning, plus new leads. */
+export function weeklyTrend(leads: LeadFacts[], now: Date, weeks: number) {
+  const today = new Date(Date.parse(dayKey(now)));
+  const monday = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * DAY);
   const start = new Date(monday.getTime() - (weeks - 1) * 7 * DAY);
   const buckets = Array.from({ length: weeks }, (_, i) => ({
     start: new Date(start.getTime() + i * 7 * DAY),
-    newBookers: 0,
-    repeat: 0,
-    registrations: 0,
+    firstTime: 0,
+    returning: 0,
+    newLeads: 0,
   }));
-  const idx = (d: Date) => Math.floor((d.getTime() - start.getTime()) / (7 * DAY));
-  for (const b of data.paidBookings) {
-    const i = idx(b.d);
-    if (i < 0 || i >= weeks) continue;
-    if (b.isFirst) buckets[i].newBookers++;
-    else buckets[i].repeat++;
-  }
-  for (const d of data.registrationsByDay) {
-    const i = idx(d);
-    if (i >= 0 && i < weeks) buckets[i].registrations++;
+  const idx = (d: Date) => Math.floor((Date.parse(dayKey(d)) - start.getTime()) / (7 * DAY));
+  for (const l of leads) {
+    for (const o of l.paidOrders) {
+      const i = idx(o.d);
+      if (i < 0 || i >= weeks) continue;
+      if (o.first) buckets[i].firstTime++;
+      else buckets[i].returning++;
+    }
+    const j = idx(l.joinedAt);
+    if (j >= 0 && j < weeks) buckets[j].newLeads++;
   }
   return buckets;
 }
