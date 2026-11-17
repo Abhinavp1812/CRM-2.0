@@ -107,10 +107,53 @@ export async function getPaidVisitCounts(scope: { userId: string | null }): Prom
   return new Map(rows.map((r) => [r.id, Number(r.visits)]));
 }
 
-/** Restricts a followup list to one category: either an id allow-list or a deny-list. */
+/**
+ * Narrows a followup list: to one category (an id allow-list or deny-list) and/or
+ * to customers from any of the given campaigns (lead sources; NONE_VALUE = no campaign).
+ */
 export interface SegmentScope {
   include: string[] | null;
   exclude: string[] | null;
+  leadSources?: string[];
+  /** Has a paid booking at any of these salons (by salon name). */
+  salons?: string[];
+  /** YYYY-MM-DD, inclusive: has a registration dated in this range. */
+  regFrom?: string;
+  regTo?: string;
+  /** YYYY-MM-DD, inclusive: has a paid booking dated in this range (booking date, else order date). */
+  bookFrom?: string;
+  bookTo?: string;
+}
+
+/** Extra Followups filters on top of the category. */
+export interface ListFilters {
+  leadSources: string[];
+  salons: string[];
+  regFrom?: string;
+  regTo?: string;
+  bookFrom?: string;
+  bookTo?: string;
+}
+
+const hasDateOrSalon = (s: SegmentScope | null | undefined) => !!(s && (s.salons?.length || s.regFrom || s.regTo || s.bookFrom || s.bookTo));
+
+/** Date-only columns are stored at UTC midnight: [from 00:00Z, day after `to` 00:00Z). */
+function dayRange(from?: string, to?: string): Record<string, Date> | null {
+  if (!from && !to) return null;
+  const r: Record<string, Date> = {};
+  if (from) r.gte = new Date(from + "T00:00:00Z");
+  if (to) r.lt = new Date(Date.parse(to + "T00:00:00Z") + 86_400_000);
+  return r;
+}
+
+/** Salon names that have bookings, for the Followups salon filter (names exactly as stored). */
+export async function getSalonNames(): Promise<string[]> {
+  const [salons, snapshots] = await Promise.all([
+    prisma.salon.findMany({ where: { bookings: { some: {} } }, select: { name: true } }),
+    prisma.booking.groupBy({ by: ["salonNameSnapshot"], where: { salonId: null, salonNameSnapshot: { not: null } } }),
+  ]);
+  const names = [...salons.map((s) => s.name), ...snapshots.map((s) => s.salonNameSnapshot ?? "")].filter((n) => n.trim());
+  return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
 }
 
 export function segmentScope(seg: SegmentKey | null, visits: Map<string, number>): SegmentScope | null {
@@ -119,11 +162,37 @@ export function segmentScope(seg: SegmentKey | null, visits: Map<string, number>
   return { include: Array.from(visits).filter(([, v]) => segmentOf(v) === seg).map(([id]) => id), exclude: null };
 }
 
+/** Category + campaign / salon / date filters for the Followups page; null when nothing is set. */
+export function listScope(seg: SegmentKey | null, visits: Map<string, number>, f: ListFilters): SegmentScope | null {
+  const s = segmentScope(seg, visits);
+  const any = f.leadSources.length || f.salons.length || f.regFrom || f.regTo || f.bookFrom || f.bookTo;
+  if (!any) return s;
+  return { include: s?.include ?? null, exclude: s?.exclude ?? null, ...f };
+}
+
 function segmentWhere(s: SegmentScope | null | undefined): Record<string, unknown> | null {
   if (!s) return null;
-  if (s.include) return { customerId: { in: s.include.length ? s.include : ["__no_match__"] } };
-  if (s.exclude) return { customerId: { notIn: s.exclude } };
-  return null;
+  const clauses: Record<string, unknown>[] = [];
+  if (s.include) clauses.push({ customerId: { in: s.include.length ? s.include : ["__no_match__"] } });
+  else if (s.exclude) clauses.push({ customerId: { notIn: s.exclude } });
+  if (s.leadSources?.length) clauses.push({ customer: anyOf("leadSource", s.leadSources) });
+  const reg = dayRange(s.regFrom, s.regTo);
+  if (reg) clauses.push({ customer: { registrations: { some: { onboardingDate: reg } } } });
+  // Booking date and salon must match the SAME paid booking.
+  const book = dayRange(s.bookFrom, s.bookTo);
+  if (book || s.salons?.length) {
+    const bookingAnd: Record<string, unknown>[] = [
+      { paymentStatus: { in: ["Success", "Partially Paid"] } },
+      { OR: [{ status: null }, { status: { not: "Cancelled" } }] },
+    ];
+    if (book) bookingAnd.push({ OR: [{ bookingDate: book }, { bookingDate: null, orderDate: book }] });
+    if (s.salons?.length) {
+      bookingAnd.push({ OR: [{ salon: { name: { in: s.salons } } }, { salonId: null, salonNameSnapshot: { in: s.salons } }] });
+    }
+    clauses.push({ customer: { bookings: { some: { AND: bookingAnd } } } });
+  }
+  if (clauses.length === 0) return null;
+  return clauses.length === 1 ? clauses[0] : { AND: clauses };
 }
 
 // scope: agent userId OR null (= all customers, admin combined view)
@@ -470,6 +539,10 @@ export async function getTodayFollowups(
   const where = await applyFilter(baseWhere, filter, today, tomorrow, staleCutoff, newBookingCutoff, scope, seg);
   const segInclude = seg?.include ?? null;
   const segExclude = seg?.exclude ?? null;
+  const lsAll = seg?.leadSources ?? [];
+  const lsFilter = lsAll.length > 0;
+  const lsReal = lsAll.filter((v) => v !== NONE_VALUE);
+  const lsNone = lsAll.includes(NONE_VALUE);
 
   const [bookedIds, cancelledIds] = await Promise.all([
     getBookedCustomerIds(scope, newBookingCutoff),
@@ -531,6 +604,11 @@ export async function getTodayFollowups(
 
   let followups: Awaited<ReturnType<typeof prisma.followup.findMany<{ include: typeof followupInclude }>>>;
 
+  // The Registered / Booked (type) tabs' own SQL doesn't know the date and salon
+  // filters, so with those set they go through the generic sorted path instead,
+  // keeping the same newest-first order.
+  if (!sort && hasDateOrSalon(seg) && (isRegistered || isBookedType)) sort = isRegistered ? "registered" : "booking";
+
   if (sort === "booking" || sort === "registered") {
     const orderedIds = (await idsSortedByDate(where, sort)).slice((page - 1) * pageSize, page * pageSize);
     const rows = orderedIds.length
@@ -557,6 +635,7 @@ export async function getTodayFollowups(
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
             AND (${segInclude}::text[] IS NULL OR c.id = ANY(${segInclude}::text[]))
             AND (${segExclude}::text[] IS NULL OR c.id <> ALL(${segExclude}::text[]))
+            AND (${lsFilter}::boolean = false OR c."leadSource" = ANY(${lsReal}::text[]) OR (${lsNone}::boolean AND c."leadSource" IS NULL))
           GROUP BY c.id
           ORDER BY MAX(r."onboardingDate") DESC NULLS LAST, c."firstSeenAt" DESC
           LIMIT ${pageSize} OFFSET ${skip}
@@ -571,6 +650,7 @@ export async function getTodayFollowups(
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
             AND (${segInclude}::text[] IS NULL OR c.id = ANY(${segInclude}::text[]))
             AND (${segExclude}::text[] IS NULL OR c.id <> ALL(${segExclude}::text[]))
+            AND (${lsFilter}::boolean = false OR c."leadSource" = ANY(${lsReal}::text[]) OR (${lsNone}::boolean AND c."leadSource" IS NULL))
           GROUP BY c.id
           ORDER BY MAX(b."bookingDate") DESC NULLS LAST, c."firstSeenAt" DESC
           LIMIT ${pageSize} OFFSET ${skip}

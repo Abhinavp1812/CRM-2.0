@@ -7,7 +7,9 @@ import {
   getActiveRemarkOptions,
   getActiveLeadSources,
   getPaidVisitCounts,
-  segmentScope,
+  getSalonNames,
+  listScope,
+  NONE_VALUE,
   formatPhone,
   whatsappLink,
   telLink,
@@ -23,6 +25,8 @@ import Link from "next/link";
 import { formatDateIN } from "@/lib/formatDate";
 import { SEGMENTS, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
 import SegmentBadge from "@/components/SegmentBadge";
+import MultiSelect from "@/components/MultiSelect";
+import { buildQuery, listParam } from "@/lib/params";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +35,18 @@ const PAGE_SIZE = 50;
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; filter?: string; seg?: string; sort?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    filter?: string;
+    seg?: string;
+    sort?: string;
+    campaign?: string | string[];
+    salon?: string | string[];
+    regFrom?: string;
+    regTo?: string;
+    bookFrom?: string;
+    bookTo?: string;
+  }>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
@@ -58,18 +73,39 @@ export default async function HomePage({
 
   // Category (Registered / One-time / Repeat / Frequent) comes from paid visits.
   const visits = await getPaidVisitCounts(scope);
-  const segScope = segmentScope(seg, visits);
+  // Campaign / salon / date filters - apply to every tab, card and count.
+  const isoDate = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+  const campaigns = listParam(params.campaign);
+  const extra: ExtraFilters = {
+    campaign: campaigns,
+    salon: listParam(params.salon),
+    regFrom: isoDate(params.regFrom),
+    regTo: isoDate(params.regTo),
+    bookFrom: isoDate(params.bookFrom),
+    bookTo: isoDate(params.bookTo),
+  };
+  const listFilters = {
+    leadSources: extra.campaign,
+    salons: extra.salon,
+    regFrom: extra.regFrom,
+    regTo: extra.regTo,
+    bookFrom: extra.bookFrom,
+    bookTo: extra.bookTo,
+  };
+  const hasExtra = !!(extra.campaign.length || extra.salon.length || extra.regFrom || extra.regTo || extra.bookFrom || extra.bookTo);
+  const segScope = listScope(seg, visits, listFilters);
 
-  const [followups, counts, filteredCount, remarkOptions, leadSources, segCounts] = await Promise.all([
+  const [followups, counts, filteredCount, remarkOptions, leadSources, salonNames, segCounts] = await Promise.all([
     getTodayFollowups(scope, page, PAGE_SIZE, filter, segScope, effectiveSort),
     getFollowupCounts(scope, segScope),
     getFilteredCount(scope, filter, segScope),
     getActiveRemarkOptions(),
     getActiveLeadSources(),
+    getSalonNames(),
     // How many customers of each category are in the current tab.
     Promise.all([
-      getFilteredCount(scope, filter, null),
-      ...SEGMENTS.map((x) => getFilteredCount(scope, filter, segmentScope(x.key, visits))),
+      getFilteredCount(scope, filter, listScope(null, visits, listFilters)),
+      ...SEGMENTS.map((x) => getFilteredCount(scope, filter, listScope(x.key, visits, listFilters))),
     ]),
   ]);
   const [tabTotal, ...perSegment] = segCounts;
@@ -97,7 +133,7 @@ export default async function HomePage({
       </div>
 
       {/* Customer category */}
-      <CategoryBar current={seg} filter={filter} sort={sortParam} total={tabTotal} counts={perSegment} />
+      <CategoryBar current={seg} filter={filter} sort={sortParam} extra={extra} total={tabTotal} counts={perSegment} />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
@@ -109,8 +145,67 @@ export default async function HomePage({
       </div>
 
       {/* Filter tabs */}
-      <FilterTabs currentFilter={filter} counts={counts} seg={seg} sort={sortParam} />
-      <SortBar filter={filter} seg={seg} current={shownSort} />
+      <FilterTabs currentFilter={filter} counts={counts} seg={seg} sort={sortParam} extra={extra} />
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <SortBar filter={filter} seg={seg} current={shownSort} extra={extra} />
+      </div>
+      <form method="GET" action="/" className="bg-white rounded-xl border border-gray-200 shadow-sm p-3 mb-4">
+        {filter !== "all" && <input type="hidden" name="filter" value={filter} />}
+        {seg && <input type="hidden" name="seg" value={seg} />}
+        {sortParam && <input type="hidden" name="sort" value={sortParam} />}
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 items-end">
+          <FilterField label="Campaign" wide>
+            <MultiSelect
+              name="campaign"
+              allLabel="All campaigns"
+              selected={extra.campaign}
+              options={[
+                ...leadSourceOptions.map((label) => ({ value: label, label })),
+                ...extra.campaign.filter((c) => c !== NONE_VALUE && !leadSourceOptions.includes(c)).map((c) => ({ value: c, label: c })),
+                { value: NONE_VALUE, label: "No campaign" },
+              ]}
+            />
+          </FilterField>
+          <FilterField label="Booked at salon" wide>
+            <MultiSelect
+              name="salon"
+              allLabel="All salons"
+              selected={extra.salon}
+              options={[
+                ...salonNames.map((n) => ({ value: n, label: n })),
+                ...extra.salon.filter((x) => !salonNames.includes(x)).map((x) => ({ value: x, label: x })),
+              ]}
+            />
+          </FilterField>
+          <FilterField label="Registered from">
+            <input type="date" name="regFrom" defaultValue={extra.regFrom ?? ""} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+          </FilterField>
+          <FilterField label="Registered to">
+            <input type="date" name="regTo" defaultValue={extra.regTo ?? ""} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+          </FilterField>
+          <FilterField label="Booked from">
+            <input type="date" name="bookFrom" defaultValue={extra.bookFrom ?? ""} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+          </FilterField>
+          <FilterField label="Booked to">
+            <input type="date" name="bookTo" defaultValue={extra.bookTo ?? ""} className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+          </FilterField>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+          <p className="text-[11px] text-slate-400">
+            Booked dates and salon both mean a paid booking (Success / Partially Paid). With both set, the same booking must match.
+          </p>
+          <div className="flex gap-2">
+            {hasExtra && (
+              <Link href={homeHref(filter, seg, sortParam, NO_EXTRA)} className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                Clear filters
+              </Link>
+            )}
+            <button type="submit" className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              Apply
+            </button>
+          </div>
+        </div>
+      </form>
 
       {filteredCount === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-10 text-center">
@@ -153,7 +248,7 @@ export default async function HomePage({
             </div>
           </div>
 
-          <Pagination page={page} totalPages={totalPages} filter={filter} seg={seg} sort={sortParam} />
+          <Pagination page={page} totalPages={totalPages} filter={filter} seg={seg} sort={sortParam} extra={extra} />
         </>
       )}
     </Layout>
@@ -167,10 +262,12 @@ function FilterTabs({
   counts,
   seg,
   sort,
+  extra,
 }: {
   currentFilter: FollowupFilter;
   seg: SegmentKey | null;
   sort: FollowupSort | null;
+  extra: ExtraFilters;
   counts: {
     total: number; cold: number; booked: number; todaysFollowup: number;
     pipeline: number; actionRequired: number; registered: number; bookedType: number;
@@ -191,7 +288,7 @@ function FilterTabs({
     <div className="flex items-end gap-0.5 mb-4 border-b border-gray-200 overflow-x-auto pb-px">
       {tabs.map((t) => {
         const active = currentFilter === t.id;
-        const href = homeHref(t.id, seg, sort);
+        const href = homeHref(t.id, seg, sort, extra);
         return (
           <Link
             key={t.id}
@@ -225,14 +322,14 @@ const SORTS: { id: FollowupSort; label: string }[] = [
   { id: "followup", label: "Next followup date" },
 ];
 
-function SortBar({ filter, seg, current }: { filter: FollowupFilter; seg: SegmentKey | null; current: FollowupSort }) {
+function SortBar({ filter, seg, current, extra }: { filter: FollowupFilter; seg: SegmentKey | null; current: FollowupSort; extra: ExtraFilters }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       <span className="text-slate-500 font-medium">Sort by:</span>
       {SORTS.map((x) => (
         <Link
           key={x.id}
-          href={homeHref(filter, seg, x.id)}
+          href={homeHref(filter, seg, x.id, extra)}
           className={
             "px-2.5 py-1 rounded-full border font-medium " +
             (current === x.id ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-gray-200 hover:bg-slate-50")
@@ -247,21 +344,51 @@ function SortBar({ filter, seg, current }: { filter: FollowupFilter; seg: Segmen
 
 // ── Customer category bar ─────────────────────────────────────────────────────
 
-function homeHref(filter: FollowupFilter, seg: SegmentKey | null, sort?: FollowupSort | null) {
-  const q = [filter !== "all" ? "filter=" + filter : "", seg ? "seg=" + seg : "", sort ? "sort=" + sort : ""].filter(Boolean).join("&");
-  return "/" + (q ? "?" + q : "");
+/** Campaign / salon / date filters carried by every link on the page. */
+interface ExtraFilters {
+  campaign: string[];
+  salon: string[];
+  regFrom?: string;
+  regTo?: string;
+  bookFrom?: string;
+  bookTo?: string;
+}
+const NO_EXTRA: ExtraFilters = { campaign: [], salon: [] };
+
+function FilterField({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={"block " + (wide ? "col-span-2" : "")}>
+      <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function homeHref(filter: FollowupFilter, seg: SegmentKey | null, sort: FollowupSort | null | undefined, extra: ExtraFilters, page?: number) {
+  return (
+    "/" +
+    buildQuery({
+      filter: filter !== "all" ? filter : undefined,
+      seg: seg ?? undefined,
+      sort: sort ?? undefined,
+      ...extra,
+      page: page && page > 1 ? String(page) : undefined,
+    })
+  );
 }
 
 function CategoryBar({
   current,
   filter,
   sort,
+  extra,
   total,
   counts,
 }: {
   current: SegmentKey | null;
   filter: FollowupFilter;
   sort: FollowupSort | null;
+  extra: ExtraFilters;
   total: number;
   counts: number[];
 }) {
@@ -270,7 +397,7 @@ function CategoryBar({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Customer category (in this tab)</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Link
-          href={homeHref(filter, null, sort)}
+          href={homeHref(filter, null, sort, extra)}
           className={
             "rounded-xl border-2 p-3 shadow-sm transition " +
             (current === null ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200 bg-white hover:border-slate-300")
@@ -285,7 +412,7 @@ function CategoryBar({
           return (
             <Link
               key={x.key}
-              href={homeHref(filter, active ? null : x.key, sort)}
+              href={homeHref(filter, active ? null : x.key, sort, extra)}
               title={active ? "Click again to show all categories" : "Show only " + x.label}
               className={
                 "rounded-xl border-2 p-3 shadow-sm transition " +
@@ -308,23 +435,36 @@ function CategoryBar({
 
 // ── Pagination ────────────────────────────────────────────────────────────────
 
-function Pagination({ page, totalPages, filter, seg, sort }: { page: number; totalPages: number; filter: FollowupFilter; seg: SegmentKey | null; sort: FollowupSort | null }) {
+function Pagination({
+  page,
+  totalPages,
+  filter,
+  seg,
+  sort,
+  extra,
+}: {
+  page: number;
+  totalPages: number;
+  filter: FollowupFilter;
+  seg: SegmentKey | null;
+  sort: FollowupSort | null;
+  extra: ExtraFilters;
+}) {
   if (totalPages <= 1) return null;
   const prevPage = Math.max(1, page - 1);
   const nextPage = Math.min(totalPages, page + 1);
-  const filterParam = (filter !== "all" ? "&filter=" + filter : "") + (seg ? "&seg=" + seg : "") + (sort ? "&sort=" + sort : "");
   return (
     <div className="flex items-center justify-between mt-4 px-1">
       <p className="text-sm text-slate-500">Page <span className="font-medium text-slate-700">{page}</span> of {totalPages}</p>
       <div className="flex gap-2">
         <Link
-          href={"/?page=" + prevPage + filterParam}
+          href={homeHref(filter, seg, sort, extra, prevPage)}
           className={"px-3 h-9 inline-flex items-center rounded-lg text-sm font-medium " + (page === 1 ? "bg-slate-100 text-slate-400 pointer-events-none" : "bg-white border border-gray-200 hover:bg-slate-50 text-slate-700 shadow-sm")}
         >
           ← Previous
         </Link>
         <Link
-          href={"/?page=" + nextPage + filterParam}
+          href={homeHref(filter, seg, sort, extra, nextPage)}
           className={"px-3 h-9 inline-flex items-center rounded-lg text-sm font-medium " + (page === totalPages ? "bg-slate-100 text-slate-400 pointer-events-none" : "bg-white border border-gray-200 hover:bg-slate-50 text-slate-700 shadow-sm")}
         >
           Next →
