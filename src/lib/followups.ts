@@ -416,12 +416,54 @@ export async function getFilteredCount(
   return prisma.followup.count({ where });
 }
 
+/**
+ * List order. "followup" = next followup date (with fresh leads pinned on page 1),
+ * "booking" = latest PAID booking first, "registered" = latest registration first.
+ * Customers without that date go last, in followup-date order.
+ */
+export type FollowupSort = "followup" | "booking" | "registered";
+
+/** All customer ids matching `where`, ordered newest-first by paid booking or registration date. */
+async function idsSortedByDate(where: WhereInput, sort: "booking" | "registered"): Promise<string[]> {
+  const ids = (await prisma.followup.findMany({ where, select: { customerId: true }, orderBy: { nextFollowupDate: "asc" } })).map(
+    (r) => r.customerId
+  );
+  if (ids.length === 0) return ids;
+  const dateRows =
+    sort === "booking"
+      ? await prisma.$queryRaw<{ id: string; d: Date | null }[]>`
+          SELECT b."customerId" AS id, MAX(COALESCE(b."bookingDate", b."orderDate")) AS d
+          FROM "Booking" b
+          WHERE b."customerId" = ANY(${ids}::text[])
+            AND b."paymentStatus" IN ('Success', 'Partially Paid')
+            AND COALESCE(b."status", '') <> 'Cancelled'
+          GROUP BY b."customerId"
+        `
+      : await prisma.$queryRaw<{ id: string; d: Date | null }[]>`
+          SELECT r."customerId" AS id, MAX(r."onboardingDate") AS d
+          FROM "Registration" r
+          WHERE r."customerId" = ANY(${ids}::text[])
+          GROUP BY r."customerId"
+        `;
+  const dateOf = new Map(dateRows.filter((r) => r.d).map((r) => [r.id, new Date(r.d!).getTime()]));
+  const pos = new Map(ids.map((id, i) => [id, i]));
+  return [...ids].sort((a, b) => {
+    const da = dateOf.get(a);
+    const db = dateOf.get(b);
+    if (da !== undefined && db !== undefined && da !== db) return db - da;
+    if (da !== undefined && db === undefined) return -1;
+    if (da === undefined && db !== undefined) return 1;
+    return pos.get(a)! - pos.get(b)!;
+  });
+}
+
 export async function getTodayFollowups(
   scope: { userId: string | null },
   page = 1,
   pageSize = 50,
   filter: FollowupFilter = "all",
-  seg?: SegmentScope | null
+  seg?: SegmentScope | null,
+  sort?: FollowupSort | null
 ): Promise<FollowupRow[]> {
   const { today, tomorrow, staleCutoff, newBookingCutoff } = getDateMarkers();
   const baseWhere = buildBaseWhere(scope);
@@ -445,11 +487,18 @@ export async function getTodayFollowups(
         doNotContact: true,
         leadSource: true,
         owner: { select: { name: true } },
+        // Latest PAID booking (Success / Partially Paid, not cancelled) - the same
+        // rule the "Latest booking" sort and the category badge use.
         bookings: {
-          orderBy: { bookingDate: "desc" as const },
+          where: {
+            paymentStatus: { in: ["Success", "Partially Paid"] },
+            OR: [{ status: null }, { status: { not: "Cancelled" } }],
+          },
+          orderBy: [{ bookingDate: { sort: "desc" as const, nulls: "last" as const } }, { orderDate: "desc" as const }],
           take: 1,
           select: {
             bookingDate: true,
+            orderDate: true,
             salonNameSnapshot: true,
             salon: { select: { name: true } },
           },
@@ -482,7 +531,14 @@ export async function getTodayFollowups(
 
   let followups: Awaited<ReturnType<typeof prisma.followup.findMany<{ include: typeof followupInclude }>>>;
 
-  if (isRegistered || isBookedType) {
+  if (sort === "booking" || sort === "registered") {
+    const orderedIds = (await idsSortedByDate(where, sort)).slice((page - 1) * pageSize, page * pageSize);
+    const rows = orderedIds.length
+      ? await prisma.followup.findMany({ where: { customerId: { in: orderedIds } }, include: followupInclude })
+      : [];
+    const byCustomerId = new Map(rows.map((f) => [f.customer.id, f]));
+    followups = orderedIds.map((id) => byCustomerId.get(id)).filter((f): f is NonNullable<typeof f> => f !== undefined);
+  } else if (isRegistered || isBookedType) {
     const skip = (page - 1) * pageSize;
     const ownerId = scope.userId;
     // Inner-joined to Followup and restricted to untouched (no remark, never
@@ -596,7 +652,7 @@ export async function getTodayFollowups(
       currentNote: f.currentNote,
       leadTemperature: f.leadTemperature,
       lastContactedAt: f.lastContactedAt,
-      lastBookingDate: lastBooking?.bookingDate || null,
+      lastBookingDate: lastBooking?.bookingDate ?? lastBooking?.orderDate ?? null,
       lastBookingSalon: lastBooking?.salon?.name || lastBooking?.salonNameSnapshot || null,
       registeredAt: f.customer.registrations[0]?.onboardingDate ?? null,
       ownerName: f.customer.owner?.name || null,

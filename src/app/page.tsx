@@ -12,6 +12,7 @@ import {
   whatsappLink,
   telLink,
   type FollowupFilter,
+  type FollowupSort,
   type BookingFlavor,
 } from "@/lib/followups";
 import { CustomerTypeBadge, FollowupStatusBadge, LeadTemperatureBadge } from "@/components/StatusBadge";
@@ -30,7 +31,7 @@ const PAGE_SIZE = 50;
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; filter?: string; seg?: string }>;
+  searchParams: Promise<{ page?: string; filter?: string; seg?: string; sort?: string }>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
@@ -45,6 +46,12 @@ export default async function HomePage({
     : "all";
 
   const seg: SegmentKey | null = isSegmentKey(params.seg) ? params.seg : null;
+  // Sort: what the user picked, else latest booking for booked categories and latest
+  // registration for "Registered only"; with no category, each tab keeps its own order.
+  const sortParam: FollowupSort | null =
+    params.sort === "booking" || params.sort === "registered" || params.sort === "followup" ? params.sort : null;
+  const effectiveSort: FollowupSort | null = sortParam ?? (seg === "registered" ? "registered" : seg ? "booking" : null);
+  const shownSort: FollowupSort = effectiveSort ?? (filter === "registered" ? "registered" : filter === "booked_type" ? "booking" : "followup");
 
   const isAdmin = session.user.role === "ADMIN";
   const scope = { userId: isAdmin ? null : session.user.id };
@@ -54,7 +61,7 @@ export default async function HomePage({
   const segScope = segmentScope(seg, visits);
 
   const [followups, counts, filteredCount, remarkOptions, leadSources, segCounts] = await Promise.all([
-    getTodayFollowups(scope, page, PAGE_SIZE, filter, segScope),
+    getTodayFollowups(scope, page, PAGE_SIZE, filter, segScope, effectiveSort),
     getFollowupCounts(scope, segScope),
     getFilteredCount(scope, filter, segScope),
     getActiveRemarkOptions(),
@@ -90,7 +97,7 @@ export default async function HomePage({
       </div>
 
       {/* Customer category */}
-      <CategoryBar current={seg} filter={filter} total={tabTotal} counts={perSegment} />
+      <CategoryBar current={seg} filter={filter} sort={sortParam} total={tabTotal} counts={perSegment} />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
@@ -102,7 +109,8 @@ export default async function HomePage({
       </div>
 
       {/* Filter tabs */}
-      <FilterTabs currentFilter={filter} counts={counts} seg={seg} />
+      <FilterTabs currentFilter={filter} counts={counts} seg={seg} sort={sortParam} />
+      <SortBar filter={filter} seg={seg} current={shownSort} />
 
       {filteredCount === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-10 text-center">
@@ -145,7 +153,7 @@ export default async function HomePage({
             </div>
           </div>
 
-          <Pagination page={page} totalPages={totalPages} filter={filter} seg={seg} />
+          <Pagination page={page} totalPages={totalPages} filter={filter} seg={seg} sort={sortParam} />
         </>
       )}
     </Layout>
@@ -158,9 +166,11 @@ function FilterTabs({
   currentFilter,
   counts,
   seg,
+  sort,
 }: {
   currentFilter: FollowupFilter;
   seg: SegmentKey | null;
+  sort: FollowupSort | null;
   counts: {
     total: number; cold: number; booked: number; todaysFollowup: number;
     pipeline: number; actionRequired: number; registered: number; bookedType: number;
@@ -181,7 +191,7 @@ function FilterTabs({
     <div className="flex items-end gap-0.5 mb-4 border-b border-gray-200 overflow-x-auto pb-px">
       {tabs.map((t) => {
         const active = currentFilter === t.id;
-        const href = homeHref(t.id, seg);
+        const href = homeHref(t.id, seg, sort);
         return (
           <Link
             key={t.id}
@@ -207,21 +217,51 @@ function FilterTabs({
   );
 }
 
+// ── Sort ──────────────────────────────────────────────────────────────────────
+
+const SORTS: { id: FollowupSort; label: string }[] = [
+  { id: "booking", label: "Latest booking first" },
+  { id: "registered", label: "Latest registration first" },
+  { id: "followup", label: "Next followup date" },
+];
+
+function SortBar({ filter, seg, current }: { filter: FollowupFilter; seg: SegmentKey | null; current: FollowupSort }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+      <span className="text-slate-500 font-medium">Sort by:</span>
+      {SORTS.map((x) => (
+        <Link
+          key={x.id}
+          href={homeHref(filter, seg, x.id)}
+          className={
+            "px-2.5 py-1 rounded-full border font-medium " +
+            (current === x.id ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-gray-200 hover:bg-slate-50")
+          }
+        >
+          {x.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 // ── Customer category bar ─────────────────────────────────────────────────────
 
-function homeHref(filter: FollowupFilter, seg: SegmentKey | null) {
-  const q = [filter !== "all" ? "filter=" + filter : "", seg ? "seg=" + seg : ""].filter(Boolean).join("&");
+function homeHref(filter: FollowupFilter, seg: SegmentKey | null, sort?: FollowupSort | null) {
+  const q = [filter !== "all" ? "filter=" + filter : "", seg ? "seg=" + seg : "", sort ? "sort=" + sort : ""].filter(Boolean).join("&");
   return "/" + (q ? "?" + q : "");
 }
 
 function CategoryBar({
   current,
   filter,
+  sort,
   total,
   counts,
 }: {
   current: SegmentKey | null;
   filter: FollowupFilter;
+  sort: FollowupSort | null;
   total: number;
   counts: number[];
 }) {
@@ -230,7 +270,7 @@ function CategoryBar({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Customer category (in this tab)</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Link
-          href={homeHref(filter, null)}
+          href={homeHref(filter, null, sort)}
           className={
             "rounded-xl border-2 p-3 shadow-sm transition " +
             (current === null ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200 bg-white hover:border-slate-300")
@@ -245,7 +285,7 @@ function CategoryBar({
           return (
             <Link
               key={x.key}
-              href={homeHref(filter, active ? null : x.key)}
+              href={homeHref(filter, active ? null : x.key, sort)}
               title={active ? "Click again to show all categories" : "Show only " + x.label}
               className={
                 "rounded-xl border-2 p-3 shadow-sm transition " +
@@ -268,11 +308,11 @@ function CategoryBar({
 
 // ── Pagination ────────────────────────────────────────────────────────────────
 
-function Pagination({ page, totalPages, filter, seg }: { page: number; totalPages: number; filter: FollowupFilter; seg: SegmentKey | null }) {
+function Pagination({ page, totalPages, filter, seg, sort }: { page: number; totalPages: number; filter: FollowupFilter; seg: SegmentKey | null; sort: FollowupSort | null }) {
   if (totalPages <= 1) return null;
   const prevPage = Math.max(1, page - 1);
   const nextPage = Math.min(totalPages, page + 1);
-  const filterParam = (filter !== "all" ? "&filter=" + filter : "") + (seg ? "&seg=" + seg : "");
+  const filterParam = (filter !== "all" ? "&filter=" + filter : "") + (seg ? "&seg=" + seg : "") + (sort ? "&sort=" + sort : "");
   return (
     <div className="flex items-center justify-between mt-4 px-1">
       <p className="text-sm text-slate-500">Page <span className="font-medium text-slate-700">{page}</span> of {totalPages}</p>
