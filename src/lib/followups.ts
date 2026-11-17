@@ -1,5 +1,6 @@
 ﻿import { prisma } from "@/lib/prisma";
 import { startOfTodayIST } from "@/lib/formatDate";
+import { segmentOf, type SegmentKey } from "@/lib/segments";
 
 const STALE_THRESHOLD_DAYS = 60;
 const NEW_BOOKING_DAYS = 20;
@@ -80,6 +81,49 @@ function getDateMarkers() {
   const newBookingCutoff = new Date(today);
   newBookingCutoff.setDate(newBookingCutoff.getDate() - NEW_BOOKING_DAYS);
   return { today, tomorrow, staleCutoff, newBookingCutoff };
+}
+
+// ── Customer categories (Registered / One-time / Repeat / Frequent) ──────────
+
+/**
+ * Paid visits per customer - only customers with at least one. A visit is one
+ * paid booking day (payment Success / Partially Paid, not cancelled); several
+ * orders on the same day count once. Same rule as Insights.
+ */
+export async function getPaidVisitCounts(scope: { userId: string | null }): Promise<Map<string, number>> {
+  const ownerId = scope.userId;
+  const rows = await prisma.$queryRaw<{ id: string; visits: number }[]>`
+    SELECT b."customerId" AS id,
+           COUNT(DISTINCT CAST(COALESCE(b."orderDate", b."bookingDate") AS date))::int AS visits
+    FROM "Booking" b
+    JOIN "Customer" c ON c.id = b."customerId"
+    WHERE c."deletedAt" IS NULL
+      AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
+      AND b."paymentStatus" IN ('Success', 'Partially Paid')
+      AND COALESCE(b."status", '') <> 'Cancelled'
+      AND COALESCE(b."orderDate", b."bookingDate") IS NOT NULL
+    GROUP BY b."customerId"
+  `;
+  return new Map(rows.map((r) => [r.id, Number(r.visits)]));
+}
+
+/** Restricts a followup list to one category: either an id allow-list or a deny-list. */
+export interface SegmentScope {
+  include: string[] | null;
+  exclude: string[] | null;
+}
+
+export function segmentScope(seg: SegmentKey | null, visits: Map<string, number>): SegmentScope | null {
+  if (!seg) return null;
+  if (seg === "registered") return { include: null, exclude: Array.from(visits.keys()) };
+  return { include: Array.from(visits).filter(([, v]) => segmentOf(v) === seg).map(([id]) => id), exclude: null };
+}
+
+function segmentWhere(s: SegmentScope | null | undefined): Record<string, unknown> | null {
+  if (!s) return null;
+  if (s.include) return { customerId: { in: s.include.length ? s.include : ["__no_match__"] } };
+  if (s.exclude) return { customerId: { notIn: s.exclude } };
+  return null;
 }
 
 // scope: agent userId OR null (= all customers, admin combined view)
@@ -174,9 +218,10 @@ function classifyBooking(
   return null;
 }
 
-export async function getFollowupCounts(scope: { userId: string | null }): Promise<FollowupCounts> {
+export async function getFollowupCounts(scope: { userId: string | null }, seg?: SegmentScope | null): Promise<FollowupCounts> {
   const { today, tomorrow, staleCutoff, newBookingCutoff } = getDateMarkers();
-  const baseWhere = buildBaseWhere(scope);
+  const segW = segmentWhere(seg);
+  const baseWhere = { ...buildBaseWhere(scope), ...(segW ? { AND: [segW] } : {}) };
 
   const bookedIds = await getBookedCustomerIds(scope, newBookingCutoff);
   const bookedArr = Array.from(bookedIds);
@@ -285,7 +330,8 @@ async function applyFilter(
   tomorrow: Date,
   staleCutoff: Date,
   newBookingCutoff: Date,
-  scope: { userId: string | null }
+  scope: { userId: string | null },
+  seg?: SegmentScope | null
 ): Promise<WhereInput> {
   const customerFilter: {
     ownerId?: string;
@@ -301,6 +347,8 @@ async function applyFilter(
   if (filter === "booked_type") customerFilter.customerType = "CUSTOMER";
 
   const where: WhereInput = { customer: customerFilter };
+  const segW = segmentWhere(seg);
+  if (segW) where.AND = [segW];
 
   if (filter === "registered" || filter === "booked_type") {
     // Awaiting first contact only - once touched, this customer already has a
@@ -357,10 +405,14 @@ async function applyFilter(
   return where;
 }
 
-export async function getFilteredCount(scope: { userId: string | null }, filter: FollowupFilter): Promise<number> {
+export async function getFilteredCount(
+  scope: { userId: string | null },
+  filter: FollowupFilter,
+  seg?: SegmentScope | null
+): Promise<number> {
   const { today, tomorrow, staleCutoff, newBookingCutoff } = getDateMarkers();
   const baseWhere = buildBaseWhere(scope);
-  const where = await applyFilter(baseWhere, filter, today, tomorrow, staleCutoff, newBookingCutoff, scope);
+  const where = await applyFilter(baseWhere, filter, today, tomorrow, staleCutoff, newBookingCutoff, scope, seg);
   return prisma.followup.count({ where });
 }
 
@@ -368,11 +420,14 @@ export async function getTodayFollowups(
   scope: { userId: string | null },
   page = 1,
   pageSize = 50,
-  filter: FollowupFilter = "all"
+  filter: FollowupFilter = "all",
+  seg?: SegmentScope | null
 ): Promise<FollowupRow[]> {
   const { today, tomorrow, staleCutoff, newBookingCutoff } = getDateMarkers();
   const baseWhere = buildBaseWhere(scope);
-  const where = await applyFilter(baseWhere, filter, today, tomorrow, staleCutoff, newBookingCutoff, scope);
+  const where = await applyFilter(baseWhere, filter, today, tomorrow, staleCutoff, newBookingCutoff, scope, seg);
+  const segInclude = seg?.include ?? null;
+  const segExclude = seg?.exclude ?? null;
 
   const [bookedIds, cancelledIds] = await Promise.all([
     getBookedCustomerIds(scope, newBookingCutoff),
@@ -444,6 +499,8 @@ export async function getTodayFollowups(
           WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'NEW_REGISTRATION'
             AND f."currentRemark" IS NULL AND f."lastContactedAt" IS NULL
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
+            AND (${segInclude}::text[] IS NULL OR c.id = ANY(${segInclude}::text[]))
+            AND (${segExclude}::text[] IS NULL OR c.id <> ALL(${segExclude}::text[]))
           GROUP BY c.id
           ORDER BY MAX(r."onboardingDate") DESC NULLS LAST, c."firstSeenAt" DESC
           LIMIT ${pageSize} OFFSET ${skip}
@@ -456,6 +513,8 @@ export async function getTodayFollowups(
           WHERE c."deletedAt" IS NULL AND c."doNotContact" = false AND c."customerType" = 'CUSTOMER'
             AND f."currentRemark" IS NULL AND f."lastContactedAt" IS NULL
             AND (${ownerId}::text IS NULL OR c."ownerId" = ${ownerId})
+            AND (${segInclude}::text[] IS NULL OR c.id = ANY(${segInclude}::text[]))
+            AND (${segExclude}::text[] IS NULL OR c.id <> ALL(${segExclude}::text[]))
           GROUP BY c.id
           ORDER BY MAX(b."bookingDate") DESC NULLS LAST, c."firstSeenAt" DESC
           LIMIT ${pageSize} OFFSET ${skip}

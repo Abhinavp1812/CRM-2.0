@@ -15,6 +15,7 @@ import {
   CalendarDaysIcon,
   TagIcon,
   LightBulbIcon,
+  ShareIcon,
 } from "@heroicons/react/24/outline";
 
 export default async function AdminPage() {
@@ -70,6 +71,13 @@ export default async function AdminPage() {
           color="amber"
           title="Insights"
           description="Why customers stop booking - regulars who went quiet, failed payments, salon and coupon return rates"
+        />
+        <AdminTile
+          href="/admin/insights2"
+          icon={ShareIcon}
+          color="green"
+          title="Insights 2.0"
+          description="Follow-up decision tree - who converted after our calls, by category (registered, one-time, repeat, frequent)"
         />
         <AdminTile
           href="/admin/tracker"

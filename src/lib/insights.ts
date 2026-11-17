@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { listParam, oneParam, type SearchParamsRecord } from "@/lib/params";
+import { segmentOf, type SegmentKey } from "@/lib/segments";
 
 /**
  * Admin > Insights: what happened to every lead, which campaigns work, and why
@@ -132,7 +133,42 @@ export interface LeadFacts {
   outcome: OutcomeKey;
   /** Only for not-booked and lapsed leads (see FIXED_REASONS). */
   reason: string | null;
+
+  // ---- Follow-up journey (Insights 2.0) ----
+  /** Category today, from all paid visits. */
+  segmentNow: SegmentKey;
+  /** Category on the day we first called them (paid visits before that day); today's category if never called. */
+  segmentAtStart: SegmentKey;
+  /** Separate days the team called / left a remark. */
+  contactDays: number;
+  firstContactAt: Date | null;
+  /** First paid visit on or after the day of our first call. */
+  convertedAt: Date | null;
+  journey: JourneyKey;
 }
+
+/**
+ * Where each customer ends up in the Insights 2.0 tree (exactly one):
+ *   never called  -> booked without a call | waiting for the first call
+ *   called        -> converted after 1st call | do not contact after 1st call |
+ *                    (needed more follow-ups) converted later | do not contact later | still in pipeline
+ * "Converted" = a real paid visit on or after the day of our first call, before
+ * the day of the second call for "after 1st call". "Do not contact" = flagged DNC,
+ * or their followup was closed (e.g. Not Interested) without a booking.
+ */
+export const JOURNEYS = [
+  "nocall_booked",
+  "nocall_never",
+  "first_converted",
+  "first_closed",
+  "later_converted",
+  "later_closed",
+  "pipeline",
+] as const;
+export type JourneyKey = (typeof JOURNEYS)[number];
+
+/** Remarks that mean "they booked" - a closed followup with one of these is not a "do not contact". */
+const POSITIVE_REMARK = /^(booked|converted|service taken)/i;
 
 export type BookingLite = {
   d: Date;
@@ -220,6 +256,20 @@ export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLit
   const latestTemp = [...acts].reverse().find((a) => a.leadTemperature)?.leadTemperature ?? null;
   const remarkAct = lastWithRemark(acts);
 
+  // ---- follow-up journey ----
+  const contactDayKeys = Array.from(new Set(acts.map((a) => dayKey(a.createdAt)))).sort();
+  const firstContactDay = contactDayKeys[0];
+  const secondContactDay = contactDayKeys[1];
+  const segmentNow = segmentOf(visitDays.length);
+  const segmentAtStart = firstContactDay ? segmentOf(visitDays.filter((d) => d < firstContactDay).length) : segmentNow;
+  const convertDay = firstContactDay ? visitDays.find((d) => d >= firstContactDay) : undefined;
+  const closed = c.doNotContact || (c.followup === null && !POSITIVE_REMARK.test(remarkAct?.remark ?? ""));
+  let journey: JourneyKey;
+  if (!firstContactDay) journey = visitDays.length > 0 ? "nocall_booked" : "nocall_never";
+  else if (convertDay) journey = !secondContactDay || convertDay < secondContactDay ? "first_converted" : "later_converted";
+  else if (closed) journey = contactDayKeys.length <= 1 ? "first_closed" : "later_closed";
+  else journey = "pipeline";
+
   // ---- outcome ----
   let outcome: OutcomeKey;
   if (visitDays.length === 0) {
@@ -281,6 +331,12 @@ export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLit
     latestNote: latestNoteOf(acts),
     outcome,
     reason,
+    segmentNow,
+    segmentAtStart,
+    contactDays: contactDayKeys.length,
+    firstContactAt: acts[0]?.createdAt ?? null,
+    convertedAt: convertDay ? new Date(Date.parse(convertDay)) : null,
+    journey,
   };
 }
 

@@ -23,6 +23,7 @@ import {
   CalendarDaysIcon,
   TagIcon,
   LightBulbIcon,
+  ShareIcon,
 } from "@heroicons/react/24/outline";
 import { signOut, useSession } from "next-auth/react";
 import SelfLeaveButton from "./SelfLeaveButton";
@@ -92,6 +93,7 @@ export default function Sidebar() {
     { label: "Closed", href: "/admin/closed-followups", icon: NoSymbolIcon },
     { label: "Team Stats", href: "/admin/stats", icon: ChartBarIcon },
     { label: "Insights", href: "/admin/insights", icon: LightBulbIcon },
+    { label: "Insights 2.0", href: "/admin/insights2", icon: ShareIcon },
     { label: "Tracker", href: "/admin/tracker", icon: CalendarDaysIcon },
     { label: "Agent Reports", href: "/admin/reports", icon: DocumentArrowDownIcon },
     { label: "Lead Sources", href: "/admin/lead-sources", icon: TagIcon },
@@ -102,7 +104,7 @@ export default function Sidebar() {
 
   const isActive = (href: string) => {
     if (href === "/" || href === "/admin") return pathname === href;
-    return pathname.startsWith(href);
+    return pathname === href || pathname.startsWith(href + "/");
   };
 
   const renderNavItem = (item: NavItem) => {

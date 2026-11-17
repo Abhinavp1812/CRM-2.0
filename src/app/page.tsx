@@ -6,6 +6,8 @@ import {
   getFilteredCount,
   getActiveRemarkOptions,
   getActiveLeadSources,
+  getPaidVisitCounts,
+  segmentScope,
   formatPhone,
   whatsappLink,
   telLink,
@@ -18,6 +20,7 @@ import FollowupEditButton from "@/components/FollowupEditButton";
 import SearchBar from "@/components/SearchBar";
 import Link from "next/link";
 import { formatDateIN } from "@/lib/formatDate";
+import { SEGMENTS, segmentOf, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +29,7 @@ const PAGE_SIZE = 50;
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; filter?: string }>;
+  searchParams: Promise<{ page?: string; filter?: string; seg?: string }>;
 }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
@@ -40,16 +43,29 @@ export default async function HomePage({
     ? (params.filter as FollowupFilter)
     : "all";
 
+  const seg: SegmentKey | null = isSegmentKey(params.seg) ? params.seg : null;
+
   const isAdmin = session.user.role === "ADMIN";
   const scope = { userId: isAdmin ? null : session.user.id };
 
-  const [followups, counts, filteredCount, remarkOptions, leadSources] = await Promise.all([
-    getTodayFollowups(scope, page, PAGE_SIZE, filter),
-    getFollowupCounts(scope),
-    getFilteredCount(scope, filter),
+  // Category (Registered / One-time / Repeat / Frequent) comes from paid visits.
+  const visits = await getPaidVisitCounts(scope);
+  const segScope = segmentScope(seg, visits);
+
+  const [followups, counts, filteredCount, remarkOptions, leadSources, segCounts] = await Promise.all([
+    getTodayFollowups(scope, page, PAGE_SIZE, filter, segScope),
+    getFollowupCounts(scope, segScope),
+    getFilteredCount(scope, filter, segScope),
     getActiveRemarkOptions(),
     getActiveLeadSources(),
+    // How many customers of each category are in the current tab.
+    Promise.all([
+      getFilteredCount(scope, filter, null),
+      ...SEGMENTS.map((x) => getFilteredCount(scope, filter, segmentScope(x.key, visits))),
+    ]),
   ]);
+  const [tabTotal, ...perSegment] = segCounts;
+  const visitsOf = (customerId: string) => visits.get(customerId) ?? 0;
   const leadSourceOptions = leadSources.map((s) => s.label);
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
@@ -64,12 +80,16 @@ export default async function HomePage({
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             {filteredCount.toLocaleString()} <span className="text-slate-400">of</span> {counts.total.toLocaleString()} customers
+            {seg && <span className="text-slate-400"> · {segmentInfo(seg).label}</span>}
           </p>
         </div>
         <div className="w-full sm:w-auto sm:max-w-xs">
           <SearchBar />
         </div>
       </div>
+
+      {/* Customer category */}
+      <CategoryBar current={seg} filter={filter} total={tabTotal} counts={perSegment} />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
@@ -81,7 +101,7 @@ export default async function HomePage({
       </div>
 
       {/* Filter tabs */}
-      <FilterTabs currentFilter={filter} counts={counts} />
+      <FilterTabs currentFilter={filter} counts={counts} seg={seg} />
 
       {filteredCount === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-10 text-center">
@@ -92,7 +112,7 @@ export default async function HomePage({
           {/* Mobile card list */}
           <div className="md:hidden space-y-3">
             {followups.map((f) => (
-              <FollowupCard key={f.customerId} f={f} remarkOptions={remarkOptions} leadSourceOptions={leadSourceOptions} showOwner={isAdmin} />
+              <FollowupCard key={f.customerId} f={f} visits={visitsOf(f.customerId)} remarkOptions={remarkOptions} leadSourceOptions={leadSourceOptions} showOwner={isAdmin} />
             ))}
           </div>
 
@@ -117,14 +137,14 @@ export default async function HomePage({
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {followups.map((f) => (
-                    <FollowupRow key={f.customerId} f={f} remarkOptions={remarkOptions} leadSourceOptions={leadSourceOptions} showOwner={isAdmin} />
+                    <FollowupRow key={f.customerId} f={f} visits={visitsOf(f.customerId)} remarkOptions={remarkOptions} leadSourceOptions={leadSourceOptions} showOwner={isAdmin} />
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
 
-          <Pagination page={page} totalPages={totalPages} filter={filter} />
+          <Pagination page={page} totalPages={totalPages} filter={filter} seg={seg} />
         </>
       )}
     </Layout>
@@ -136,8 +156,10 @@ export default async function HomePage({
 function FilterTabs({
   currentFilter,
   counts,
+  seg,
 }: {
   currentFilter: FollowupFilter;
+  seg: SegmentKey | null;
   counts: {
     total: number; cold: number; booked: number; todaysFollowup: number;
     pipeline: number; actionRequired: number; registered: number; bookedType: number;
@@ -158,7 +180,7 @@ function FilterTabs({
     <div className="flex items-end gap-0.5 mb-4 border-b border-gray-200 overflow-x-auto pb-px">
       {tabs.map((t) => {
         const active = currentFilter === t.id;
-        const href = t.id === "all" ? "/" : "/?filter=" + t.id;
+        const href = homeHref(t.id, seg);
         return (
           <Link
             key={t.id}
@@ -184,13 +206,86 @@ function FilterTabs({
   );
 }
 
+// ── Customer category bar ─────────────────────────────────────────────────────
+
+function homeHref(filter: FollowupFilter, seg: SegmentKey | null) {
+  const q = [filter !== "all" ? "filter=" + filter : "", seg ? "seg=" + seg : ""].filter(Boolean).join("&");
+  return "/" + (q ? "?" + q : "");
+}
+
+function CategoryBar({
+  current,
+  filter,
+  total,
+  counts,
+}: {
+  current: SegmentKey | null;
+  filter: FollowupFilter;
+  total: number;
+  counts: number[];
+}) {
+  return (
+    <div className="mb-5">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Customer category (in this tab)</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <Link
+          href={homeHref(filter, null)}
+          className={
+            "rounded-xl border-2 p-3 shadow-sm transition " +
+            (current === null ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200 bg-white hover:border-slate-300")
+          }
+        >
+          <p className="text-xs font-semibold text-slate-600">All categories</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{total.toLocaleString()}</p>
+          <p className="text-[11px] text-slate-400">everyone in this tab</p>
+        </Link>
+        {SEGMENTS.map((x, i) => {
+          const active = current === x.key;
+          return (
+            <Link
+              key={x.key}
+              href={homeHref(filter, active ? null : x.key)}
+              title={active ? "Click again to show all categories" : "Show only " + x.label}
+              className={
+                "rounded-xl border-2 p-3 shadow-sm transition " +
+                (active ? x.card + " ring-2 " + x.ring : "border-gray-200 bg-white hover:border-slate-300")
+              }
+            >
+              <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <span className={"w-2.5 h-2.5 rounded-full " + x.dot} />
+                {x.label}
+              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{(counts[i] ?? 0).toLocaleString()}</p>
+              <p className="text-[11px] text-slate-400">{x.help}</p>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SegmentBadge({ visits }: { visits: number }) {
+  const x = segmentInfo(segmentOf(visits));
+  return (
+    <span
+      className={"inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded-full border font-medium " + x.badge}
+      title={x.label + ": " + visits + " paid visit" + (visits === 1 ? "" : "s")}
+    >
+      <span className={"w-1.5 h-1.5 rounded-full " + x.dot} />
+      {x.short}
+      {visits > 0 && <span className="opacity-70">· {visits}</span>}
+    </span>
+  );
+}
+
 // ── Pagination ────────────────────────────────────────────────────────────────
 
-function Pagination({ page, totalPages, filter }: { page: number; totalPages: number; filter: FollowupFilter; }) {
+function Pagination({ page, totalPages, filter, seg }: { page: number; totalPages: number; filter: FollowupFilter; seg: SegmentKey | null }) {
   if (totalPages <= 1) return null;
   const prevPage = Math.max(1, page - 1);
   const nextPage = Math.min(totalPages, page + 1);
-  const filterParam = filter !== "all" ? "&filter=" + filter : "";
+  const filterParam = (filter !== "all" ? "&filter=" + filter : "") + (seg ? "&seg=" + seg : "");
   return (
     <div className="flex items-center justify-between mt-4 px-1">
       <p className="text-sm text-slate-500">Page <span className="font-medium text-slate-700">{page}</span> of {totalPages}</p>
@@ -241,11 +336,13 @@ function BookingFlavorBadge({ flavor }: { flavor: BookingFlavor }) {
 
 function FollowupRow({
   f,
+  visits,
   remarkOptions,
   leadSourceOptions,
   showOwner,
 }: {
   f: FollowupData;
+  visits: number;
   remarkOptions: RemarkOption[];
   leadSourceOptions: string[];
   showOwner: boolean;
@@ -265,6 +362,7 @@ function FollowupRow({
           {f.customerName ?? "(no name)"}
         </Link>
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          <SegmentBadge visits={visits} />
           {f.isNew && !f.isBooked && !f.isCancelledRecovery && (
             <span className="inline-block px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">New</span>
           )}
@@ -327,11 +425,13 @@ function FollowupRow({
 
 function FollowupCard({
   f,
+  visits,
   remarkOptions,
   leadSourceOptions,
   showOwner,
 }: {
   f: FollowupData;
+  visits: number;
   remarkOptions: RemarkOption[];
   leadSourceOptions: string[];
   showOwner: boolean;
@@ -346,6 +446,7 @@ function FollowupCard({
       {/* Top row: status + badges */}
       <div className="flex items-center gap-2 px-4 pt-3 pb-2 flex-wrap">
         <FollowupStatusBadge status={f.status} />
+        <SegmentBadge visits={visits} />
         <CustomerTypeBadge type={f.customerType} doNotContact={f.doNotContact} />
         {f.isNew && !f.isBooked && !f.isCancelledRecovery && (
           <span className="inline-block px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full font-medium">New</span>
