@@ -5,6 +5,8 @@ import { TREE, treeStats, flattenTree, findNode, conversionByCategory, nodeList 
 import { SEGMENTS, segmentInfo, isSegmentKey } from "@/lib/segments";
 import { oneParam, searchParamsToRecord } from "@/lib/params";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
+import { responseLabel } from "@/lib/callActivity";
 
 export const maxDuration = 60;
 
@@ -49,6 +51,61 @@ export async function GET(req: Request) {
   if (session?.user?.role !== "ADMIN") return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
 
   const raw = searchParamsToRecord(new URL(req.url).searchParams);
+
+  // "Calls in a date range" tree download.
+  const pnode = oneParam(raw.pnode);
+  if (pnode) {
+    const { fromStr, toStr } = periodRange(raw);
+    const pFilters = { ...parseFilters(raw), salon: [] };
+    const called = await loadPeriodCustomers(fromStr, toStr, pFilters);
+    const pt = periodTree(called, `${formatDateIN(fromStr)} - ${formatDateIN(toStr)}`);
+    if (!pt.stats.has(pnode)) return new Response(JSON.stringify({ error: "Unknown box" }), { status: 400 });
+    const psegParam = oneParam(raw.pseg);
+    const pseg = isSegmentKey(psegParam) ? psegParam : null;
+    const wb = XLSX.utils.book_new();
+    if (pnode === "all" && !pseg) {
+      addSheet(
+        wb,
+        "Tree",
+        flattenTree(pt.tree).map(({ node: n, depth, parent }) => {
+          const s = pt.stats.get(n.key)!;
+          return {
+            Box: "    ".repeat(depth) + n.title,
+            Customers: s.total,
+            "% of box above": parent ? pct(s.total, pt.stats.get(parent.key)!.total) : 100,
+            ...Object.fromEntries(SEGMENTS.map((x) => [x.label, s.bySegment[x.key]])),
+          };
+        })
+      );
+    }
+    addSheet(
+      wb,
+      pt.titleOf(pnode) + (pseg ? " - " + segmentInfo(pseg).label : ""),
+      periodSelect(called, pnode, pseg).map((c) => ({
+        Customer: c.name ?? "",
+        Phone: c.phone,
+        City: c.city ?? "",
+        "Category (when first called in range)": segmentInfo(c.segment).label,
+        Owner: c.ownerName ?? "",
+        Campaign: c.campaign ?? "",
+        "First call": formatDateIN(c.firstAt),
+        "Calls & remarks": c.activities,
+        Response: responseLabel(c.response),
+        "Booked on": c.bookedOn ? formatDateIN(c.bookedOn) : "",
+        "Latest remark": c.remark ?? "",
+        "Remark by": c.remarkBy ?? "",
+        "Latest note": c.note ?? "",
+      }))
+    );
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    return new Response(buf as unknown as BodyInit, {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="calls-${fromStr}_to_${toStr}.xlsx"`,
+      },
+    });
+  }
+
   const nodeKey = oneParam(raw.node) || "report";
   const node = nodeKey === "report" ? null : findNode(nodeKey);
   if (nodeKey !== "report" && !node) return new Response(JSON.stringify({ error: "Unknown node" }), { status: 400 });

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { formatPhone, whatsappLink, telLink, getActiveRemarkOptions, getActiveLeadSources } from "@/lib/followups";
 import { CustomerTypeBadge, LeadTemperatureBadge } from "@/components/StatusBadge";
 import Layout from "@/components/Layout";
+import SegmentBadge from "@/components/SegmentBadge";
 import SearchBar from "@/components/SearchBar";
 import FollowupEditButton from "@/components/FollowupEditButton";
 import LogCallButton from "@/components/LogCallButton";
@@ -63,6 +64,11 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     (b.paymentStatus === "Success" || b.paymentStatus === "Partially Paid") && b.status !== "Cancelled";
   const paidBookings = customer.bookings.filter(isPaid);
   const unpaidBookings = customer.bookings.filter((b) => !isPaid(b));
+  // Category (Registered only / One-time / Repeat / Frequent) counts visits: separate
+  // paid booking days, so several orders on one day are one visit.
+  const paidVisits = new Set(
+    paidBookings.map((b) => b.orderDate ?? b.bookingDate).filter((d): d is Date => !!d).map((d) => d.toISOString().slice(0, 10))
+  ).size;
   const lastBooking = paidBookings[0];
   const totalSpend = paidBookings.reduce((sum, b) => sum + (b.grandTotal ? Number(b.grandTotal) : 0), 0);
   const waMessage = "Hi " + (customer.name ?? "") + ", this is from Style Lounge.";
@@ -101,7 +107,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               <div className="min-w-0">
                 <div className="flex items-center gap-3 flex-wrap mb-1">
                   <h1 className="text-xl md:text-2xl font-bold text-gray-900">{customer.name || "(no name)"}</h1>
-                  <CustomerTypeBadge type={customer.customerType} doNotContact={customer.doNotContact} />
+                  <SegmentBadge visits={paidVisits} size="lg" />
+                  {customer.doNotContact && <CustomerTypeBadge type={customer.customerType} doNotContact />}
                   <LeadTemperatureBadge temperature={customer.followup?.leadTemperature || null} />
                 </div>
                 <p className="text-sm text-slate-600">

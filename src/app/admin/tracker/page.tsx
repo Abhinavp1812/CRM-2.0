@@ -11,7 +11,10 @@ import {
   type BehaviourBookingRow,
   type NeverBookedRow,
 } from "@/lib/trackerBehaviour";
-import { formatDateIN } from "@/lib/formatDate";
+import { formatDateIN, istDayRange } from "@/lib/formatDate";
+import { loadCallActivity, summarizeCalledCustomers } from "@/lib/callActivity";
+import { SEGMENTS } from "@/lib/segments";
+import { buildQuery } from "@/lib/params";
 import { resolveTrackerParams, WINDOW_MONTH_OPTIONS } from "@/lib/trackerParams";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +56,11 @@ export default async function TrackerPage({
         : Promise.resolve(null),
     type === "neverbooked" ? getNeverBooked(page, PAGE_SIZE) : Promise.resolve(null),
   ]);
+
+  const callRows = await loadCallActivity({ start: istDayRange(fromStr).start, end: istDayRange(toStr).end });
+  const calledCustomers = await summarizeCalledCustomers(callRows);
+  const calledBooked = calledCustomers.filter((c) => c.response === "booked").length;
+  const reportHref = (seg: string[]) => "/reports" + buildQuery({ from: fromStr, to: toStr, seg });
 
   function buildHref(overrides: Record<string, string | undefined>) {
     const merged = {
@@ -141,6 +149,41 @@ export default async function TrackerPage({
           value={counts.bookings}
           note={`${fromStr} to ${toStr} · paid only (Success / Partially Paid)`}
         />
+      </div>
+
+      {/* Calls in the same date range, by the customer's category when called */}
+      <div className="mb-3 flex flex-wrap items-baseline gap-2">
+        <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mr-2">Customers called</h2>
+        <span className="text-xs text-slate-400">
+          {fromStr} to {toStr} · category on the day of the call · click to open the call log
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-8">
+        <Link href={reportHref([])} className="rounded-xl border-2 border-gray-200 bg-white p-3 shadow-sm hover:border-blue-300 block">
+          <p className="text-xs font-semibold text-slate-700">All categories</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{calledCustomers.length.toLocaleString()}</p>
+          <p className="text-[11px] text-slate-400">{callRows.length.toLocaleString()} calls &amp; remarks</p>
+        </Link>
+        {SEGMENTS.map((s) => {
+          const n = calledCustomers.filter((c) => c.segment === s.key).length;
+          return (
+            <Link key={s.key} href={reportHref([s.key])} className="rounded-xl border-2 border-gray-200 bg-white p-3 shadow-sm hover:border-slate-300 block">
+              <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <span className={"w-2.5 h-2.5 rounded-full " + s.dot} />
+                {s.label}
+              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{n.toLocaleString()}</p>
+              <p className="text-[11px] text-slate-400">{s.help}</p>
+            </Link>
+          );
+        })}
+        <Link href={reportHref([])} className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-3 shadow-sm block">
+          <p className="text-xs font-semibold text-emerald-800">Booked after the call</p>
+          <p className="text-2xl font-bold text-emerald-700 mt-1">{calledBooked.toLocaleString()}</p>
+          <p className="text-[11px] text-emerald-700/70">
+            {calledCustomers.length ? Math.round((100 * calledBooked) / calledCustomers.length) : 0}% of customers called
+          </p>
+        </Link>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -20,7 +20,8 @@ import FollowupEditButton from "@/components/FollowupEditButton";
 import SearchBar from "@/components/SearchBar";
 import Link from "next/link";
 import { formatDateIN } from "@/lib/formatDate";
-import { SEGMENTS, segmentOf, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
+import { SEGMENTS, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
+import SegmentBadge from "@/components/SegmentBadge";
 
 export const dynamic = "force-dynamic";
 
@@ -262,20 +263,6 @@ function CategoryBar({
         })}
       </div>
     </div>
-  );
-}
-
-function SegmentBadge({ visits }: { visits: number }) {
-  const x = segmentInfo(segmentOf(visits));
-  return (
-    <span
-      className={"inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded-full border font-medium " + x.badge}
-      title={x.label + ": " + visits + " paid visit" + (visits === 1 ? "" : "s")}
-    >
-      <span className={"w-1.5 h-1.5 rounded-full " + x.dot} />
-      {x.short}
-      {visits > 0 && <span className="opacity-70">· {visits}</span>}
-    </span>
   );
 }
 

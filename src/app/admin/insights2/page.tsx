@@ -8,6 +8,8 @@ import { TREE, treeStats, findNode, flattenTree, conversionByCategory, nodeList,
 import { SEGMENTS, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
 import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
+import { responseLabel, type CalledCustomer } from "@/lib/callActivity";
 import styles from "./tree.module.css";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,23 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
   const byCategory = conversionByCategory(leads);
   const st = (key: string) => stats.get(key)!;
 
-  const fp = { from: filters.from, to: filters.to, campaign: filters.campaign, owner: filters.owner };
+  // "Calls in a date range" tree - its own dates (cfrom / cto), same campaign & agent filters.
+  const { fromStr: pFrom, toStr: pTo } = periodRange(raw);
+  const pRangeText = pFrom === pTo ? formatDateIN(pFrom) : `${formatDateIN(pFrom)} - ${formatDateIN(pTo)}`;
+  const periodCustomers = await loadPeriodCustomers(pFrom, pTo, filters);
+  const pt = periodTree(periodCustomers, pRangeText);
+  const pNodeKey = oneParam(raw.pnode);
+  const pNode = pNodeKey && pt.stats.has(pNodeKey) ? pNodeKey : null;
+  const psegParam = oneParam(raw.pseg);
+  const pseg: SegmentKey | null = isSegmentKey(psegParam) ? psegParam : null;
+  const ppage = Math.max(1, parseInt(oneParam(raw.ppage) || "1", 10) || 1);
+  const pRows = pNode ? periodSelect(periodCustomers, pNode, pseg) : [];
+  const pTotalPages = Math.max(1, Math.ceil(pRows.length / PAGE_SIZE));
+  const pPageRows = pRows.slice((ppage - 1) * PAGE_SIZE, ppage * PAGE_SIZE);
+
+  const fp = { from: filters.from, to: filters.to, campaign: filters.campaign, owner: filters.owner, cfrom: pFrom, cto: pTo };
+  const periodHref = (key: string, s?: SegmentKey | null, pg?: number) =>
+    "/admin/insights2" + buildQuery({ ...fp, pnode: key, pseg: s ?? undefined, ppage: pg && pg > 1 ? String(pg) : undefined }) + "#plist";
   const nodeHref = (key: string, s?: SegmentKey | null) => "/admin/insights2" + buildQuery({ ...fp, node: key, seg: s ?? undefined }) + "#list";
   const filterHref = (patch: Partial<typeof fp>) => "/admin/insights2" + buildQuery({ ...fp, ...patch });
   const exportHref = (extra: Record<string, string | undefined>) => "/api/admin/insights2/export" + buildQuery({ ...fp, ...extra });
@@ -120,6 +138,8 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
 
       {/* ---------- Filters ---------- */}
       <form method="GET" action="/admin/insights2" className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-5">
+        <input type="hidden" name="cfrom" value={pFrom} />
+        <input type="hidden" name="cto" value={pTo} />
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           <Field label="Joined from">
             <input type="date" name="from" defaultValue={filters.from ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm" />
@@ -276,6 +296,129 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
             <LegendDot className="bg-rose-500" label="Do not contact" />
           </div>
         </div>
+      </div>
+
+      {/* ---------- Calls in a date range ---------- */}
+      <div id="calls" className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 scroll-mt-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-semibold text-gray-900">Calls in a date range - who we called and what they said</h2>
+            <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+              Pick any dates. Each customer called in that range counts once, coloured by their category on the day of their first call in the range. Uses the
+              campaign and agent filters above (not the joined dates).
+            </p>
+          </div>
+          <a href={exportHref({ pnode: "all" })} download className="px-2.5 h-7 inline-flex items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-medium">
+            Download Excel
+          </a>
+        </div>
+        <form method="GET" action="/admin/insights2#calls" className="flex flex-wrap items-end gap-3 mb-2">
+          {filters.from && <input type="hidden" name="from" value={filters.from} />}
+          {filters.to && <input type="hidden" name="to" value={filters.to} />}
+          {filters.campaign.map((c) => <input key={"c" + c} type="hidden" name="campaign" value={c} />)}
+          {filters.owner.map((o) => <input key={"o" + o} type="hidden" name="owner" value={o} />)}
+          <Field label="Called from">
+            <input type="date" name="cfrom" defaultValue={pFrom} max={today} className="border rounded-lg px-2 py-1.5 text-sm" />
+          </Field>
+          <Field label="Called to">
+            <input type="date" name="cto" defaultValue={pTo} max={today} className="border rounded-lg px-2 py-1.5 text-sm" />
+          </Field>
+          <button type="submit" className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Show</button>
+        </form>
+        <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
+          <span className="text-slate-500">Quick dates:</span>
+          {[
+            { label: "Today", from: today, to: today },
+            { label: "Yesterday", from: daysAgo(1), to: daysAgo(1) },
+            { label: "Last 7 days", from: daysAgo(6), to: today },
+            { label: "Last 30 days", from: daysAgo(29), to: today },
+            { label: "This month", from: monthStart, to: today },
+          ].map((r) => {
+            const active = pFrom === r.from && pTo === r.to;
+            return (
+              <Link
+                key={r.label}
+                href={"/admin/insights2" + buildQuery({ ...fp, cfrom: r.from, cto: r.to }) + "#calls"}
+                className={"px-2.5 py-1 rounded-full border " + (active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-gray-200 hover:bg-slate-50")}
+              >
+                {r.label}
+              </Link>
+            );
+          })}
+        </div>
+        {periodCustomers.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">Nobody was called in this date range.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {SEGMENTS.map((s) => {
+                const n = pt.stats.get("all")!.bySegment[s.key];
+                const b = pt.stats.get("booked")!.bySegment[s.key];
+                return (
+                  <Link key={s.key} href={periodHref("all", s.key)} className={"rounded-xl border p-3 hover:shadow-sm transition " + s.card}>
+                    <p className="text-xs font-semibold flex items-center gap-1.5">
+                      <span className={"w-2.5 h-2.5 rounded-full " + s.dot} />
+                      {s.label} called
+                    </p>
+                    <p className="text-2xl font-bold text-gray-900 mt-0.5">{num(n)}</p>
+                    <p className="text-[11px] opacity-80">
+                      {num(b)} booked after the call ({pct(b, n)}%)
+                    </p>
+                  </Link>
+                );
+              })}
+            </div>
+            <div className="overflow-x-auto pb-2">
+              <ul className={styles.root}>
+                <TreeBranch node={pt.tree} parentTotal={null} stats={pt.stats} selectedKey={pNode} hrefFor={(k) => periodHref(k)} />
+              </ul>
+            </div>
+          </>
+        )}
+
+        {pNode && (
+          <div id="plist" className="scroll-mt-4 mt-5 border-t pt-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+              <h3 className="text-base font-semibold text-gray-900">
+                {pt.titleOf(pNode)} <span className="text-slate-400 font-normal">({num(pRows.length)})</span>
+              </h3>
+              <div className="flex gap-2">
+                <a href={exportHref({ pnode: pNode, pseg: pseg ?? undefined })} download className="px-3 h-8 inline-flex items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-medium">
+                  Download this list (Excel)
+                </a>
+                <Link href={"/admin/insights2" + buildQuery(fp) + "#calls"} className="px-3 h-8 inline-flex items-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium">
+                  Close
+                </Link>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <SegChip href={periodHref(pNode, null)} active={!pseg} label="All categories" count={pt.stats.get(pNode)!.total} />
+              {SEGMENTS.map((s) => (
+                <SegChip key={s.key} href={periodHref(pNode, s.key)} active={pseg === s.key} label={s.label} count={pt.stats.get(pNode)!.bySegment[s.key]} dot={s.dot} />
+              ))}
+            </div>
+            <CalledTable rows={pPageRows} />
+            {pTotalPages > 1 && (
+              <div className="flex items-center justify-between mt-4 px-1">
+                <p className="text-sm text-gray-600">Page {ppage} of {pTotalPages}</p>
+                <div className="flex gap-2">
+                  <Link
+                    href={periodHref(pNode, pseg, Math.max(1, ppage - 1))}
+                    className={"px-3 h-9 inline-flex items-center rounded text-sm " + (ppage === 1 ? "bg-gray-100 text-gray-400 pointer-events-none" : "bg-white border hover:bg-gray-50 text-gray-700")}
+                  >
+                    Previous
+                  </Link>
+                  <Link
+                    href={periodHref(pNode, pseg, Math.min(pTotalPages, ppage + 1))}
+                    className={"px-3 h-9 inline-flex items-center rounded text-sm " + (ppage === pTotalPages ? "bg-gray-100 text-gray-400 pointer-events-none" : "bg-white border hover:bg-gray-50 text-gray-700")}
+                  >
+                    Next
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ---------- Customer list for the clicked box ---------- */}
@@ -573,6 +716,69 @@ function CustomerTable({ rows }: { rows: LeadFacts[] }) {
                   <span className="text-slate-400">No notes yet</span>
                 )}
               </td>
+              <td className="px-3 py-3">
+                <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CalledTable({ rows }: { rows: CalledCustomer[] }) {
+  if (rows.length === 0) return <div className="bg-slate-50 rounded-lg p-8 text-center text-gray-600">No customers here.</div>;
+  return (
+    <div className="rounded-lg border border-gray-200 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b">
+          <tr className="text-left text-xs font-medium text-gray-700 uppercase">
+            <th className="px-3 py-3">Customer</th>
+            <th className="px-3 py-3">Phone</th>
+            <th className="px-3 py-3" title="Category on the day of their first call in this range">Category</th>
+            <th className="px-3 py-3">Owner</th>
+            <th className="px-3 py-3">Campaign</th>
+            <th className="px-3 py-3">First call</th>
+            <th className="px-3 py-3 text-right" title="Calls and remarks in this range">Calls</th>
+            <th className="px-3 py-3">Response</th>
+            <th className="px-3 py-3">Booked on</th>
+            <th className="px-3 py-3">Latest remark</th>
+            <th className="px-3 py-3">Latest note</th>
+            <th className="px-3 py-3"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rows.map((r) => (
+            <tr key={r.id} className="hover:bg-gray-50 align-top">
+              <td className="px-3 py-3 font-medium text-gray-900">
+                {r.name ?? "(no name)"}
+                {r.city && <div className="text-xs text-slate-400 font-normal">{r.city}</div>}
+              </td>
+              <td className="px-3 py-3 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
+              <td className="px-3 py-3"><SegBadge k={r.segment} /></td>
+              <td className="px-3 py-3 text-gray-600">{r.ownerName ?? "-"}</td>
+              <td className="px-3 py-3 text-gray-600 text-xs">{r.campaign ?? "-"}</td>
+              <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{formatDateIN(r.firstAt)}</td>
+              <td className="px-3 py-3 text-right text-gray-900">{r.activities}</td>
+              <td className="px-3 py-3 text-xs whitespace-nowrap">
+                <span className={r.response === "booked" ? "font-semibold text-emerald-700" : "text-gray-800"}>{responseLabel(r.response)}</span>
+              </td>
+              <td className="px-3 py-3 whitespace-nowrap">{r.bookedOn ? <span className="text-emerald-700 font-medium">{formatDateIN(r.bookedOn)}</span> : "-"}</td>
+              <td className="px-3 py-3 text-xs min-w-[9rem]">
+                {r.remark ? (
+                  <>
+                    <span className="font-medium text-gray-800">{r.remark}</span>
+                    <div className="text-slate-400">
+                      {r.remarkAt ? formatDateIN(r.remarkAt) : ""}
+                      {r.remarkBy ? " · " + r.remarkBy : ""}
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-slate-400">No remark</span>
+                )}
+              </td>
+              <td className="px-3 py-3 text-xs text-gray-700 min-w-[12rem] max-w-[18rem] whitespace-pre-line">{r.note ? "\u201c" + r.note + "\u201d" : <span className="text-slate-400">-</span>}</td>
               <td className="px-3 py-3">
                 <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
               </td>
