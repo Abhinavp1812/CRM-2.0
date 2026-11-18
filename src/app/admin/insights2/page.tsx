@@ -10,6 +10,8 @@ import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
 import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
 import { responseLabel, type CalledCustomer } from "@/lib/callActivity";
+import { PAY_TREE, payTreeStats, payStatusComparison, recoveryStats, paySelect, payKeyTitle } from "@/lib/paymentTree";
+import { PAY_STATUSES } from "@/lib/insights";
 import styles from "./tree.module.css";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +69,22 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
   const nodeHref = (key: string, s?: SegmentKey | null) => "/admin/insights2" + buildQuery({ ...fp, node: key, seg: s ?? undefined }) + "#list";
   const filterHref = (patch: Partial<typeof fp>) => "/admin/insights2" + buildQuery({ ...fp, ...patch });
   const exportHref = (extra: Record<string, string | undefined>) => "/api/admin/insights2/export" + buildQuery({ ...fp, ...extra });
+
+  // Payments: success vs partially paid vs failed, and who booked after a failed payment.
+  const payStats = payTreeStats(leads);
+  const payCompare = payStatusComparison(leads);
+  const recovery = recoveryStats(leads);
+  const payKeyParam = oneParam(raw.paynode);
+  const payKey = payKeyParam && payKeyTitle(payKeyParam) ? payKeyParam : null;
+  const paysegParam = oneParam(raw.payseg);
+  const payseg: SegmentKey | null = isSegmentKey(paysegParam) ? paysegParam : null;
+  const paypage = Math.max(1, parseInt(oneParam(raw.paypage) || "1", 10) || 1);
+  const payRowsAll = payKey ? paySelect(leads, payKey, null) : [];
+  const payRows = payseg ? payRowsAll.filter((l) => l.segmentNow === payseg) : payRowsAll;
+  const payTotalPages = Math.max(1, Math.ceil(payRows.length / PAGE_SIZE));
+  const payPageRows = payRows.slice((paypage - 1) * PAGE_SIZE, paypage * PAGE_SIZE);
+  const payHref = (key: string, s?: SegmentKey | null, pg?: number) =>
+    "/admin/insights2" + buildQuery({ ...fp, paynode: key, payseg: s ?? undefined, paypage: pg && pg > 1 ? String(pg) : undefined }) + "#paylist";
 
   // Filter options come from every customer, so a choice never disappears.
   const countBy = (xs: string[]) => {
@@ -298,6 +316,144 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
+      {/* ---------- Payments ---------- */}
+      <div id="payments" className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 scroll-mt-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h2 className="font-semibold text-gray-900">Payments - success, partially paid and failed</h2>
+            <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+              Every order by payment status, and whether customers whose payment failed went on to book. &ldquo;Booked&rdquo; = a Success or Partially Paid
+              order (not cancelled) on or after the day of their first failed payment. Cancelled / refunded orders are always counted separately, never as
+              failed. Uses the filters above. Colours = category today.
+            </p>
+          </div>
+          <a href={exportHref({ paynode: "report" })} download className="px-2.5 h-7 inline-flex items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-medium">
+            Download Excel
+          </a>
+        </div>
+
+        {/* Order comparison */}
+        <div className="overflow-x-auto mb-5">
+          <table className="w-full text-sm min-w-[680px]">
+            <thead>
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b">
+                <th className="px-2 py-2">Payment status</th>
+                <th className="px-2 py-2 text-right">Orders</th>
+                <th className="px-2 py-2 w-64">Share of orders</th>
+                <th className="px-2 py-2 text-right">Customers</th>
+                <th className="px-2 py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {(() => {
+                const totalOrders = payCompare.reduce((a, s) => a + s.orders, 0);
+                return payCompare.map((s) => (
+                  <tr key={s.key} className={payKey === "status:" + s.key ? "bg-blue-50" : ""}>
+                    <td className="px-2 py-2.5">
+                      <Link href={payHref("status:" + s.key)} className="inline-flex items-center gap-2 text-blue-700 hover:underline">
+                        <span className={"w-2.5 h-2.5 rounded-sm " + s.bar} />
+                        {s.label}
+                      </Link>
+                    </td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-gray-900">{num(s.orders)}</td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={"h-full rounded-full " + s.bar} style={{ width: pct(s.orders, totalOrders) + "%" }} />
+                        </div>
+                        <span className="text-xs text-slate-500 w-9 text-right">{pct(s.orders, totalOrders)}%</span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-gray-700">{num(s.customers)}</td>
+                    <td className="px-2 py-2.5 text-right text-gray-900 whitespace-nowrap">{rupees(s.amount)}</td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            A customer can be in several rows (e.g. a failed order and a successful one). Amount for Failed = the value of orders that didn&apos;t go through.
+          </p>
+        </div>
+
+        {/* Recovery headline */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <Kpi label="Payment failed" value={num(recovery.failed)} sub="customers with a failed order" href={payHref("failed")} tone="bad" />
+          <Kpi
+            label="Booked after failing"
+            value={pct(recovery.recovered, recovery.failed) + "%"}
+            sub={`${num(recovery.recovered)} customers · ${num(recovery.sameDay)} the same day`}
+            href={payHref("recovered")}
+            tone="good"
+            big
+          />
+          <Kpi
+            label="Time to book again"
+            value={recovery.medianDays === null ? "-" : recovery.medianDays === 0 ? "Same day" : `${recovery.medianDays} days`}
+            sub="typical, for those who did"
+            href={payHref("recovered")}
+          />
+          <Kpi
+            label="Lost, nobody called"
+            value={num(recovery.lostNotCalled)}
+            sub={`of ${num(recovery.lost)} who didn't book after failing`}
+            href={payHref("lost_notcalled")}
+            tone="bad"
+          />
+        </div>
+
+        {/* Tree */}
+        <div className="overflow-x-auto pb-2">
+          <ul className={styles.root}>
+            <TreeBranch node={PAY_TREE} parentTotal={null} stats={payStats} selectedKey={payKey} hrefFor={(k) => payHref(k)} />
+          </ul>
+        </div>
+
+        {payKey && (
+          <div id="paylist" className="scroll-mt-4 mt-5 border-t pt-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+              <h3 className="text-base font-semibold text-gray-900">
+                {payKeyTitle(payKey)} <span className="text-slate-400 font-normal">({num(payRows.length)})</span>
+              </h3>
+              <div className="flex gap-2">
+                <a href={exportHref({ paynode: payKey, payseg: payseg ?? undefined })} download className="px-3 h-8 inline-flex items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-medium">
+                  Download this list (Excel)
+                </a>
+                <Link href={"/admin/insights2" + buildQuery(fp) + "#payments"} className="px-3 h-8 inline-flex items-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium">
+                  Close
+                </Link>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <SegChip href={payHref(payKey, null)} active={!payseg} label="All categories" count={payRowsAll.length} />
+              {SEGMENTS.map((s) => (
+                <SegChip key={s.key} href={payHref(payKey, s.key)} active={payseg === s.key} label={s.label} count={payRowsAll.filter((l) => l.segmentNow === s.key).length} dot={s.dot} />
+              ))}
+            </div>
+            <PayTable rows={payPageRows} />
+            {payTotalPages > 1 && (
+              <div className="flex items-center justify-between mt-4 px-1">
+                <p className="text-sm text-gray-600">Page {paypage} of {payTotalPages}</p>
+                <div className="flex gap-2">
+                  <Link
+                    href={payHref(payKey, payseg, Math.max(1, paypage - 1))}
+                    className={"px-3 h-9 inline-flex items-center rounded text-sm " + (paypage === 1 ? "bg-gray-100 text-gray-400 pointer-events-none" : "bg-white border hover:bg-gray-50 text-gray-700")}
+                  >
+                    Previous
+                  </Link>
+                  <Link
+                    href={payHref(payKey, payseg, Math.min(payTotalPages, paypage + 1))}
+                    className={"px-3 h-9 inline-flex items-center rounded text-sm " + (paypage === payTotalPages ? "bg-gray-100 text-gray-400 pointer-events-none" : "bg-white border hover:bg-gray-50 text-gray-700")}
+                  >
+                    Next
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ---------- Calls in a date range ---------- */}
       <div id="calls" className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 scroll-mt-4">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
@@ -484,7 +640,7 @@ function TreeBranch({
   selectedKey,
   hrefFor,
 }: {
-  node: TreeNode;
+  node: TreeNode<string>;
   parentTotal: number | null;
   stats: Map<string, NodeStats>;
   selectedKey: string | null;
@@ -505,7 +661,7 @@ function TreeBranch({
   );
 }
 
-function NodeCard({ node, stats, parentTotal, selected, href }: { node: TreeNode; stats: NodeStats; parentTotal: number | null; selected: boolean; href: string }) {
+function NodeCard({ node, stats, parentTotal, selected, href }: { node: TreeNode<string>; stats: NodeStats; parentTotal: number | null; selected: boolean; href: string }) {
   const t = TONES[node.tone];
   const share = parentTotal !== null ? pct(stats.total, parentTotal) : 100;
   return (
@@ -784,6 +940,99 @@ function CalledTable({ rows }: { rows: CalledCustomer[] }) {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PayTable({ rows }: { rows: LeadFacts[] }) {
+  if (rows.length === 0) return <div className="bg-slate-50 rounded-lg p-8 text-center text-gray-600">No customers here.</div>;
+  const day = 86_400_000;
+  return (
+    <div className="rounded-lg border border-gray-200 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b">
+          <tr className="text-left text-xs font-medium text-gray-700 uppercase">
+            <th className="px-3 py-3">Customer</th>
+            <th className="px-3 py-3">Phone</th>
+            <th className="px-3 py-3">Category</th>
+            <th className="px-3 py-3">Owner</th>
+            <th className="px-3 py-3">Campaign</th>
+            <th className="px-3 py-3" title="Orders by payment status">Orders</th>
+            <th className="px-3 py-3">First failed</th>
+            <th className="px-3 py-3">Booked after failure</th>
+            <th className="px-3 py-3" title="The team called or left a remark on or after the day of the first failed payment">Called after failure</th>
+            <th className="px-3 py-3 text-right">Paid</th>
+            <th className="px-3 py-3 text-right">Failed amount</th>
+            <th className="px-3 py-3">Latest remark</th>
+            <th className="px-3 py-3"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rows.map((r) => {
+            const paid = r.orderStats.success.amount + r.orderStats.partial.amount;
+            const recoverDays =
+              r.firstFailedAt && r.bookedAfterFailAt ? Math.max(0, Math.round((r.bookedAfterFailAt.getTime() - r.firstFailedAt.getTime()) / day)) : null;
+            return (
+              <tr key={r.id} className="hover:bg-gray-50 align-top">
+                <td className="px-3 py-3 font-medium text-gray-900">
+                  {r.name ?? "(no name)"}
+                  {r.city && <div className="text-xs text-slate-400 font-normal">{r.city}</div>}
+                </td>
+                <td className="px-3 py-3 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
+                <td className="px-3 py-3"><SegBadge k={r.segmentNow} /></td>
+                <td className="px-3 py-3 text-gray-600">{r.ownerName}</td>
+                <td className="px-3 py-3 text-gray-600 text-xs">{r.campaign === NO_CAMPAIGN ? "-" : r.campaign}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {PAY_STATUSES.filter((s) => r.orderStats[s.key].orders > 0).map((s) => (
+                      <span key={s.key} className="inline-flex items-center gap-1 text-[11px] text-gray-700 whitespace-nowrap" title={s.label}>
+                        <span className={"w-2 h-2 rounded-sm " + s.bar} />
+                        {s.short} {r.orderStats[s.key].orders}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap text-gray-700">{r.firstFailedAt ? formatDateIN(r.firstFailedAt) : "-"}</td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  {r.bookedAfterFailAt ? (
+                    <>
+                      <span className="text-emerald-700 font-medium">{formatDateIN(r.bookedAfterFailAt)}</span>
+                      <div className="text-[11px] text-slate-500">
+                        {r.bookedAfterFailStatus} · {recoverDays === 0 ? "same day" : `${recoverDays} days later`}
+                      </div>
+                    </>
+                  ) : r.firstFailedAt ? (
+                    <span className="text-rose-600 text-xs">Not yet</span>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+                <td className="px-3 py-3 text-xs">
+                  {r.firstFailedAt ? (r.calledAfterFail ? <span className="text-gray-700">Yes</span> : <span className="text-rose-600 font-medium">No</span>) : "-"}
+                </td>
+                <td className="px-3 py-3 text-right text-gray-900 whitespace-nowrap">{paid ? rupees(paid) : "-"}</td>
+                <td className="px-3 py-3 text-right whitespace-nowrap">{r.orderStats.failed.amount ? <span className="text-rose-600">{rupees(r.orderStats.failed.amount)}</span> : "-"}</td>
+                <td className="px-3 py-3 text-xs min-w-[9rem]">
+                  {r.latestRemark ? (
+                    <>
+                      <span className="font-medium text-gray-800">{r.latestRemark.label}</span>
+                      <div className="text-slate-400">
+                        {formatDateIN(r.latestRemark.at)}
+                        {r.latestRemark.by ? " · " + r.latestRemark.by : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">No remark</span>
+                  )}
+                </td>
+                <td className="px-3 py-3">
+                  <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -145,7 +145,53 @@ export interface LeadFacts {
   /** First paid visit on or after the day of our first call. */
   convertedAt: Date | null;
   journey: JourneyKey;
+
+  // ---- Payments (Insights 2.0) ----
+  /** Orders and their amount per payment outcome. */
+  orderStats: Record<PayStatusKey, { orders: number; amount: number }>;
+  payJourney: PayJourneyKey;
+  /** Day of their first order whose payment failed. */
+  firstFailedAt: Date | null;
+  /** First paid order (Success / Partially Paid) on or after the day of the first failure. */
+  bookedAfterFailAt: Date | null;
+  bookedAfterFailStatus: "Success" | "Partially Paid" | null;
+  /** The team called or left a remark on or after the day of the first failure. */
+  calledAfterFail: boolean;
 }
+
+/**
+ * Payment outcome of one order. Cancelled or refunded orders are always
+ * "cancelled" - never shown as failed or paid - so "failed" means a failed
+ * payment on an order that wasn't cancelled, and success + partial = real
+ * (paid) bookings, the same rule as everywhere else.
+ */
+export const PAY_STATUSES = [
+  { key: "success", label: "Success (paid in full)", short: "Success", bar: "bg-emerald-500" },
+  { key: "partial", label: "Partially Paid", short: "Partial", bar: "bg-sky-500" },
+  { key: "failed", label: "Failed", short: "Failed", bar: "bg-rose-500" },
+  { key: "cancelled", label: "Cancelled / Refunded", short: "Cancelled", bar: "bg-slate-400" },
+  { key: "other", label: "Pending / other", short: "Other", bar: "bg-amber-400" },
+] as const;
+export type PayStatusKey = (typeof PAY_STATUSES)[number]["key"];
+
+export function payStatusOf(b: { status: string | null; paymentStatus: string | null }): PayStatusKey {
+  if (b.status === "Cancelled" || b.paymentStatus === "Refunded") return "cancelled";
+  if (b.paymentStatus === "Failed") return "failed";
+  if (b.paymentStatus === "Success") return "success";
+  if (b.paymentStatus === "Partially Paid") return "partial";
+  return "other";
+}
+
+/**
+ * Where each customer who placed an order ends up in the payments tree:
+ *   never failed      -> paid_full (all paid orders Success) | paid_partial (any Partially Paid)
+ *   had a failure     -> rec_success / rec_partial (booked on or after the failed day; by that booking's status)
+ *                     -> lost_existing (no booking after, but had booked before) | lost_never (never booked)
+ *   neither           -> other_only (only pending / cancelled orders)
+ *   no orders at all  -> none (not in the tree)
+ */
+export const PAY_JOURNEYS = ["paid_full", "paid_partial", "rec_success", "rec_partial", "lost_existing", "lost_never", "other_only", "none"] as const;
+export type PayJourneyKey = (typeof PAY_JOURNEYS)[number];
 
 /**
  * Where each customer ends up in the Insights 2.0 tree (exactly one):
@@ -270,6 +316,25 @@ export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLit
   else if (closed) journey = contactDayKeys.length <= 1 ? "first_closed" : "later_closed";
   else journey = "pipeline";
 
+  // ---- payments ----
+  const orderStats = Object.fromEntries(PAY_STATUSES.map((s) => [s.key, { orders: 0, amount: 0 }])) as LeadFacts["orderStats"];
+  for (const b of list) {
+    const s = orderStats[payStatusOf(b)];
+    s.orders++;
+    s.amount += b.grandTotal;
+  }
+  // Payment failures on orders that weren't cancelled (a cancelled order is never "failed").
+  const firstFailed = list.find((b) => payStatusOf(b) === "failed");
+  const firstFailedDay = firstFailed ? dayKey(firstFailed.d) : undefined;
+  // Same day counts as "after": a failed attempt followed by a successful retry is the common case.
+  const bookedAfterFail = firstFailedDay ? paid.find((b) => dayKey(b.d) >= firstFailedDay) : undefined;
+  const bookedBeforeFail = firstFailedDay ? paid.some((b) => dayKey(b.d) < firstFailedDay) : false;
+  let payJourney: PayJourneyKey;
+  if (list.length === 0) payJourney = "none";
+  else if (!firstFailed) payJourney = paid.length === 0 ? "other_only" : paid.some((b) => b.paymentStatus === "Partially Paid") ? "paid_partial" : "paid_full";
+  else if (bookedAfterFail) payJourney = bookedAfterFail.paymentStatus === "Partially Paid" ? "rec_partial" : "rec_success";
+  else payJourney = bookedBeforeFail ? "lost_existing" : "lost_never";
+
   // ---- outcome ----
   let outcome: OutcomeKey;
   if (visitDays.length === 0) {
@@ -337,6 +402,12 @@ export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLit
     firstContactAt: acts[0]?.createdAt ?? null,
     convertedAt: convertDay ? new Date(Date.parse(convertDay)) : null,
     journey,
+    orderStats,
+    payJourney,
+    firstFailedAt: firstFailed?.d ?? null,
+    bookedAfterFailAt: bookedAfterFail?.d ?? null,
+    bookedAfterFailStatus: bookedAfterFail ? (bookedAfterFail.paymentStatus === "Partially Paid" ? "Partially Paid" : "Success") : null,
+    calledAfterFail: firstFailedDay ? acts.some((a) => dayKey(a.createdAt) >= firstFailedDay) : false,
   };
 }
 

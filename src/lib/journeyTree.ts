@@ -1,14 +1,17 @@
 import type { JourneyKey, LeadFacts } from "@/lib/insights";
 import { SEGMENTS, type SegmentKey } from "@/lib/segments";
 
-/** Insights 2.0 decision tree. Every node is the set of customers whose journey is in `leaves`. */
-export interface TreeNode {
+/**
+ * Insights 2.0 decision tree. Every node is the set of customers whose end state
+ * (follow-up journey by default, or payment journey for the payments tree) is in `leaves`.
+ */
+export interface TreeNode<K extends string = JourneyKey> {
   key: string;
   title: string;
   help: string;
   tone: "root" | "neutral" | "good" | "bad" | "pipe";
-  leaves: JourneyKey[];
-  children?: TreeNode[];
+  leaves: K[];
+  children?: TreeNode<K>[];
 }
 
 export const TREE: TreeNode = {

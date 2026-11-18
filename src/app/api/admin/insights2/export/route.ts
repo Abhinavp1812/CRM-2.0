@@ -1,7 +1,8 @@
 import { auth } from "@/auth";
 import * as XLSX from "xlsx";
-import { loadInsights, parseFilters, applyFilters, NO_CAMPAIGN, type LeadFacts } from "@/lib/insights";
-import { TREE, treeStats, flattenTree, findNode, conversionByCategory, nodeList } from "@/lib/journeyTree";
+import { loadInsights, parseFilters, applyFilters, NO_CAMPAIGN, type LeadFacts, type PayJourneyKey } from "@/lib/insights";
+import { TREE, treeStats, flattenTree, findNode, conversionByCategory, nodeList, type TreeNode } from "@/lib/journeyTree";
+import { PAY_TREE, payTreeStats, payStatusComparison, recoveryStats, paySelect, payKeyTitle } from "@/lib/paymentTree";
 import { SEGMENTS, segmentInfo, isSegmentKey } from "@/lib/segments";
 import { oneParam, searchParamsToRecord } from "@/lib/params";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
@@ -106,6 +107,67 @@ export async function GET(req: Request) {
     });
   }
 
+  // Payments section download.
+  const paynode = oneParam(raw.paynode);
+  if (paynode) {
+    if (paynode !== "report" && !payKeyTitle(paynode)) return new Response(JSON.stringify({ error: "Unknown box" }), { status: 400 });
+    const payFilters = { ...parseFilters(raw), salon: [] };
+    const { leads: everyone } = await loadInsights();
+    const leads = applyFilters(everyone, payFilters);
+    const paysegParam = oneParam(raw.payseg);
+    const payseg = isSegmentKey(paysegParam) ? paysegParam : null;
+    const wb = XLSX.utils.book_new();
+    if (paynode === "report") {
+      const stats = payTreeStats(leads);
+      const rec = recoveryStats(leads);
+      const totalOrders = payStatusComparison(leads).reduce((a, s) => a + s.orders, 0);
+      addSheet(
+        wb,
+        "By payment status",
+        payStatusComparison(leads).map((s) => ({
+          "Payment status": s.label,
+          Orders: s.orders,
+          "% of orders": pct(s.orders, totalOrders),
+          Customers: s.customers,
+          "Amount (Rs)": Math.round(s.amount),
+        }))
+      );
+      addSheet(wb, "Recovery", [
+        { Item: "Customers with a failed payment", Value: rec.failed },
+        { Item: "Booked after the failure", Value: rec.recovered },
+        { Item: "Booked after the failure %", Value: pct(rec.recovered, rec.failed) },
+        { Item: "...of which the same day", Value: rec.sameDay },
+        { Item: "Typical days to book again", Value: rec.medianDays ?? "" },
+        { Item: "Didn't book after the failure", Value: rec.lost },
+        { Item: "...and nobody called them after", Value: rec.lostNotCalled },
+      ]);
+      addSheet(
+        wb,
+        "Tree",
+        flattenPay(PAY_TREE).map(({ node: n, depth, parent }) => {
+          const s = stats.get(n.key)!;
+          return {
+            Box: "    ".repeat(depth) + n.title,
+            Customers: s.total,
+            "% of box above": parent ? pct(s.total, stats.get(parent.key)!.total) : 100,
+            ...Object.fromEntries(SEGMENTS.map((x) => [x.label, s.bySegment[x.key]])),
+            Meaning: n.help,
+          };
+        })
+      );
+      addSheet(wb, "Customers with orders", payRows(paySelect(leads, "all", null)));
+    } else {
+      addSheet(wb, (payKeyTitle(paynode) ?? paynode) + (payseg ? " - " + segmentInfo(payseg).label : ""), payRows(paySelect(leads, paynode, payseg)));
+    }
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    return new Response(buf as unknown as BodyInit, {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="payments-${paynode.replace(/[^a-z0-9_-]/gi, "-")}-${todayIsoIST()}.xlsx"`,
+      },
+    });
+  }
+
   const nodeKey = oneParam(raw.node) || "report";
   const node = nodeKey === "report" ? null : findNode(nodeKey);
   if (nodeKey !== "report" && !node) return new Response(JSON.stringify({ error: "Unknown node" }), { status: 400 });
@@ -160,5 +222,39 @@ export async function GET(req: Request) {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="insights2-${nodeKey}-${todayIsoIST()}.xlsx"`,
     },
+  });
+}
+
+function flattenPay(node: TreeNode<PayJourneyKey>, depth = 0, parent: TreeNode<PayJourneyKey> | null = null): { node: TreeNode<PayJourneyKey>; depth: number; parent: TreeNode<PayJourneyKey> | null }[] {
+  return [{ node, depth, parent }, ...(node.children ?? []).flatMap((c) => flattenPay(c, depth + 1, node))];
+}
+
+function payRows(rows: LeadFacts[]): Row[] {
+  return rows.map((r) => {
+    const recoverDays =
+      r.firstFailedAt && r.bookedAfterFailAt ? Math.max(0, Math.round((r.bookedAfterFailAt.getTime() - r.firstFailedAt.getTime()) / 86_400_000)) : "";
+    return {
+      Customer: r.name ?? "",
+      Phone: r.phone,
+      City: r.city ?? "",
+      Category: segmentInfo(r.segmentNow).label,
+      Owner: r.ownerName,
+      Campaign: r.campaign === NO_CAMPAIGN ? "" : r.campaign,
+      "Success orders": r.orderStats.success.orders,
+      "Partially paid orders": r.orderStats.partial.orders,
+      "Failed orders": r.orderStats.failed.orders,
+      "Cancelled / refunded orders": r.orderStats.cancelled.orders,
+      "Pending / other orders": r.orderStats.other.orders,
+      "Paid amount (Rs)": Math.round(r.orderStats.success.amount + r.orderStats.partial.amount),
+      "Failed amount (Rs)": Math.round(r.orderStats.failed.amount),
+      "First failed payment": r.firstFailedAt ? formatDateIN(r.firstFailedAt) : "",
+      "Booked after failure on": r.bookedAfterFailAt ? formatDateIN(r.bookedAfterFailAt) : "",
+      "Booked after failure as": r.bookedAfterFailStatus ?? "",
+      "Days to book again": recoverDays,
+      "Called after failure": r.firstFailedAt ? (r.calledAfterFail ? "Yes" : "No") : "",
+      "Latest remark": r.latestRemark?.label ?? "",
+      "Remark date": r.latestRemark ? formatDateIN(r.latestRemark.at) : "",
+      "Latest note": r.latestNote?.text ?? "",
+    };
   });
 }
