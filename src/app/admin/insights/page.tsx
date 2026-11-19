@@ -31,6 +31,7 @@ import {
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
 import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
 import MultiSelect from "@/components/MultiSelect";
+import { SEGMENTS } from "@/lib/segments";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -271,19 +272,37 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       </Section>
 
       {/* ---------- Journey ---------- */}
-      <Section title="Lead journey" note="How many leads reached each step. Some customers book without a call, so a later step isn't always a subset of the one before.">
-        <BarList
-          color="bg-blue-500"
-          base={s.leads}
-          items={[
-            { label: "Leads", value: s.leads, href: listHref({ list: "all" }) },
-            { label: "Registered", value: s.registered, href: listHref({ list: "registered" }) },
-            { label: "Contacted by our team", value: s.contacted, href: listHref({ list: "contacted_any" }) },
-            { label: "Booked at least once", value: s.booked, href: listHref({ list: "booked" }) },
-            { label: "Came back (2+ visits)", value: s.returned, href: listHref({ list: "returned" }) },
-            { label: "Regular (3+ visits)", value: s.regular, href: listHref({ list: "regular" }) },
-          ]}
+      <Section
+        title="Leads by number of visits"
+        note="Every lead is in exactly one category, by how many paid visits they've made (several orders on one day = one visit). The four add up to 100%."
+      >
+        <StackedBar
+          total={s.leads}
+          parts={SEGMENTS.map((x) => ({ key: x.key, value: s.bySegment[x.key], color: x.bar, label: x.label }))}
         />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+          {SEGMENTS.map((x) => (
+            <Link key={x.key} href={listHref({ list: "seg_" + x.key })} className={"rounded-xl border p-3 hover:shadow-sm transition " + x.card}>
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <span className={"w-2.5 h-2.5 rounded-full " + x.dot} />
+                {x.key === "registered" ? "No paid booking yet" : x.label}
+              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-0.5">{num(s.bySegment[x.key])}</p>
+              <p className="text-[11px] opacity-80">
+                {pct(s.bySegment[x.key], s.leads)}% of leads · {x.key === "registered" ? "0 visits" : x.help}
+              </p>
+            </Link>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-xs text-slate-600">
+          <Link href={listHref({ list: "registered" })} className="hover:underline">
+            Registered: <b className="text-gray-900">{num(s.registered)}</b> ({pct(s.registered, s.leads)}% of leads)
+          </Link>
+          <Link href={listHref({ list: "contacted_any" })} className="hover:underline">
+            Contacted by our team: <b className="text-gray-900">{num(s.contacted)}</b> ({pct(s.contacted, s.leads)}% of leads)
+          </Link>
+          <span className="text-slate-400">These two are separate facts, not steps - a customer can book without registering or being called.</span>
+        </div>
       </Section>
 
       {/* ---------- Campaign comparison ---------- */}

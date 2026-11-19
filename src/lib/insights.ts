@@ -554,8 +554,12 @@ export const LIST_GROUPS = {
   registered: "Leads who registered",
   contacted_any: "Leads our team contacted",
   booked: "Leads who booked (1+ paid visit)",
-  returned: "Customers who came back (2+ visits)",
-  regular: "Regular customers (3+ visits)",
+  returned: "Customers who came back (2 or more visits)",
+  // One per category - each customer is in exactly one of these four.
+  seg_registered: "No paid booking yet",
+  seg_one: "One-time customers (1 visit)",
+  seg_repeat: "Repeat customers (2-4 visits)",
+  seg_frequent: "Frequent customers (5+ visits)",
   notbooked: "Leads who haven't booked",
   lapsed: "Customers who didn't come back or stopped",
 } as const;
@@ -581,7 +585,10 @@ export function inGroup(l: LeadFacts, key: string): boolean {
     case "contacted_any": return l.contacted;
     case "booked": return l.visits >= 1;
     case "returned": return l.visits >= 2;
-    case "regular": return l.visits >= 3;
+    case "seg_registered": return l.segmentNow === "registered";
+    case "seg_one": return l.segmentNow === "one";
+    case "seg_repeat": return l.segmentNow === "repeat";
+    case "seg_frequent": return l.segmentNow === "frequent";
     case "notbooked": return l.visits === 0;
     case "lapsed": return l.outcome === "once_gone" || l.outcome === "stopped";
     default: return l.outcome === key;
@@ -624,8 +631,8 @@ export interface Summary {
   registered: number;
   contacted: number;
   booked: number;
-  returned: number;
-  regular: number;
+  /** Customers per category (by paid visits) - each customer in exactly one. */
+  bySegment: Record<SegmentKey, number>;
   /** Booked 30+ days ago, so they had a fair chance to come back. */
   eligible: number;
   eligibleReturned: number;
@@ -640,8 +647,7 @@ export function summarize(leads: LeadFacts[], now: Date): Summary {
     registered: 0,
     contacted: 0,
     booked: 0,
-    returned: 0,
-    regular: 0,
+    bySegment: { registered: 0, one: 0, repeat: 0, frequent: 0 },
     eligible: 0,
     eligibleReturned: 0,
     orders: 0,
@@ -652,8 +658,7 @@ export function summarize(leads: LeadFacts[], now: Date): Summary {
     if (l.registered) s.registered++;
     if (l.contacted) s.contacted++;
     if (l.visits >= 1) s.booked++;
-    if (l.visits >= 2) s.returned++;
-    if (l.visits >= 3) s.regular++;
+    s.bySegment[l.segmentNow]++;
     if (hadTimeToReturn(l, now)) {
       s.eligible++;
       if (l.visits >= 2) s.eligibleReturned++;
