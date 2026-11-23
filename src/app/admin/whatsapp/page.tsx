@@ -6,7 +6,17 @@ import WhatsAppNudgesPanel, { type PanelGroup } from "@/components/WhatsAppNudge
 import SegmentBadge from "@/components/SegmentBadge";
 import { prisma } from "@/lib/prisma";
 import { isAnantyaConfigured, getTemplates, type AnantyaTemplate } from "@/lib/anantya";
-import { getNudgeSettings, buildAudience, GROUPS, EXCLUSIONS, VARIABLE_SOURCES, isGroupKey, type AudienceRow, type GroupKey } from "@/lib/whatsappNudges";
+import {
+  getNudgeSettings,
+  buildAudience,
+  nextRotationGroup,
+  GROUPS,
+  EXCLUSIONS,
+  VARIABLE_SOURCES,
+  isGroupKey,
+  type AudienceRow,
+  type GroupKey,
+} from "@/lib/whatsappNudges";
 import { formatDateIN, formatDateTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
@@ -35,13 +45,21 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
   // The two WhatsApp tables come from a database update; if it hasn't been run
   // yet, show how instead of breaking the page.
   let audience: Record<GroupKey, AudienceRow[]> | null = null;
+  let blockedCount = 0;
+  let salonOptions: string[] = [];
   let recent: Awaited<ReturnType<typeof loadRecent>> = [];
   let dbError: string | null = null;
   try {
-    [audience, recent] = await Promise.all([buildAudience(settings).then((a) => a.groups), loadRecent()]);
+    const [a, r] = await Promise.all([buildAudience(settings), loadRecent()]);
+    audience = a.groups;
+    blockedCount = a.blocked;
+    salonOptions = Array.from(new Set([...settings.excludeSalons, ...a.salonOptions]));
+    recent = r;
   } catch (e) {
     dbError = e instanceof Error ? e.message : "Database error";
   }
+  const next = nextRotationGroup(settings);
+  const nextAutomatic = next ? GROUPS.find((g) => g.key === next.group)!.label : null;
 
   const panelGroups: PanelGroup[] = GROUPS.map((g) => {
     const rows = audience?.[g.key] ?? [];
@@ -74,6 +92,10 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
     <Layout>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-900">WhatsApp Nudges</h1>
+        <div className="flex gap-1 mt-2 mb-3 border-b border-gray-200">
+          <span className="px-3 py-2 text-sm font-semibold text-blue-700 border-b-2 border-blue-600">Settings &amp; sending</span>
+          <Link href="/admin/whatsapp/lists" className="px-3 py-2 text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Customer lists</Link>
+        </div>
         <p className="text-sm text-slate-500 mt-1">
           Automatic WhatsApp reminders through Anantya.ai, with a different approved template for each type of customer. Customers marked Not Interested,
           Do Not Contact, Invalid Number or opted out never get them, and nobody gets more than one nudge per cooldown period.
@@ -101,6 +123,9 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
         templatesError={templatesError}
         groups={panelGroups}
         configured={configured}
+        salonOptions={salonOptions}
+        nextAutomatic={nextAutomatic}
+        blockedCount={blockedCount}
       />
 
       {/* Preview list */}

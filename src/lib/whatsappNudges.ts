@@ -1,36 +1,40 @@
 import { prisma } from "@/lib/prisma";
 import { loadInsights, type LeadFacts } from "@/lib/insights";
 import { getTemplates, sendTemplate, type AnantyaTemplate } from "@/lib/anantya";
-import { formatDateIN } from "@/lib/formatDate";
+import { buildNudgeLists, NUDGE_LISTS } from "@/lib/nudgeLists";
+import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
 
 /**
- * WhatsApp nudges via Anantya.ai.
+ * WhatsApp nudges via Anantya.ai - sending side of Admin > WhatsApp.
  *
- * Four customer groups (from the same per-customer facts as Insights, so the
- * numbers match): each can have its own approved WhatsApp template.
+ * The groups ARE the Customer lists (lib/nudgeLists.ts), so what you see in a
+ * list is exactly who can be messaged:
+ *   last25 · never · one · two · three (3-4) · frequent
+ * Each group can have its own approved WhatsApp template.
+ *
+ * Automatic mode, once a day: the "last booking 25 days ago" list + ONE count
+ * list on rotation (1 time -> 2 times -> 3-4 times -> frequent -> never booked).
+ * Each batch goes to people never nudged first, then the longest-ago nudged, so
+ * nobody gets a second nudge until everyone in that list has had one.
  *
  * Safety rules, enforced here for EVERY send (manual or automatic):
- * - Test mode (on by default): messages go ONLY to the test number, never to customers.
- * - Never nudge: opted out, Do Not Contact, latest remark Not Interested / Invalid Number,
- *   or already nudged (for real) within the cooldown.
+ * - Test mode (on by default): ONE message per send, to the test number only.
+ * - "Do not nudge" customers (opted out, Do Not Contact, latest remark Not
+ *   Interested / Invalid) are never in a group; excluded salons are left out.
+ * - Nobody gets more than one real nudge per cooldown period.
  * - At most `perRunLimit` customers per group per run.
  */
 
-export const GROUPS = [
-  { key: "registered", label: "Registered, never booked", help: "No paid booking yet and no failed payment." },
-  { key: "one_time", label: "One-time, didn't return", help: "1 paid visit, 30+ days ago, no second visit." },
-  { key: "stopped", label: "Repeat / frequent who went quiet", help: "2+ visits, now silent for over 3x their usual gap (at least 30 days)." },
-  { key: "payment_failed", label: "Payment failed, never booked", help: "Tried to book, payment failed, no paid booking since." },
-] as const;
-export type GroupKey = (typeof GROUPS)[number]["key"];
+export const GROUPS = NUDGE_LISTS.filter((l) => l.key !== "blocked").map((l) => ({ key: l.key, label: l.label, help: l.help })) as {
+  key: GroupKey;
+  label: string;
+  help: string;
+}[];
+export type GroupKey = "last25" | "never" | "one" | "two" | "three" | "frequent";
 export const isGroupKey = (v: unknown): v is GroupKey => GROUPS.some((g) => g.key === v);
 
-const inGroup: Record<GroupKey, (l: LeadFacts) => boolean> = {
-  registered: (l) => l.outcome === "not_contacted" || l.outcome === "contacted",
-  one_time: (l) => l.outcome === "once_gone",
-  stopped: (l) => l.outcome === "stopped",
-  payment_failed: (l) => l.outcome === "payment_failed",
-};
+/** Automatic mode sends last25 every day plus one of these, in turn. */
+export const ROTATION: GroupKey[] = ["one", "two", "three", "frequent", "never"];
 
 /** What fills each {{n}} in a template. */
 export const VARIABLE_SOURCES = [
@@ -64,34 +68,46 @@ export interface NudgeSettings {
   testNumber: string;
   cooldownDays: number;
   perRunLimit: number;
+  /** Anyone who ever ordered at one of these salons is never nudged. */
+  excludeSalons: string[];
+  /** Position in ROTATION for the next automatic run. */
+  rotationIndex: number;
   groups: Record<GroupKey, GroupConfig>;
 }
 
 const KEY = "whatsapp.settings";
 const DEFAULT_GROUP: GroupConfig = { enabled: false, templateId: null, variables: [] };
+const defaultGroups = (): Record<GroupKey, GroupConfig> =>
+  Object.fromEntries(GROUPS.map((g) => [g.key, { ...DEFAULT_GROUP }])) as Record<GroupKey, GroupConfig>;
 export const DEFAULT_SETTINGS: NudgeSettings = {
   mode: "manual",
   testMode: true,
   testNumber: "",
   cooldownDays: 7,
-  perRunLimit: 100,
-  groups: { registered: DEFAULT_GROUP, one_time: DEFAULT_GROUP, stopped: DEFAULT_GROUP, payment_failed: DEFAULT_GROUP },
+  perRunLimit: 40,
+  excludeSalons: [],
+  rotationIndex: 0,
+  groups: defaultGroups(),
 };
 
 export async function getNudgeSettings(): Promise<NudgeSettings> {
   const row = await prisma.setting.findUnique({ where: { key: KEY } });
-  if (!row) return DEFAULT_SETTINGS;
+  if (!row) return { ...DEFAULT_SETTINGS, groups: defaultGroups() };
   try {
     const s = JSON.parse(row.value) as Partial<NudgeSettings>;
+    const groups = defaultGroups();
+    for (const g of GROUPS) if (s.groups?.[g.key]) groups[g.key] = s.groups[g.key];
     return {
       ...DEFAULT_SETTINGS,
       ...s,
       // Test mode stays on unless it was explicitly switched off.
       testMode: s.testMode !== false,
-      groups: { ...DEFAULT_SETTINGS.groups, ...(s.groups ?? {}) },
+      excludeSalons: Array.isArray(s.excludeSalons) ? s.excludeSalons : [],
+      rotationIndex: Number.isInteger(s.rotationIndex) ? (s.rotationIndex as number) : 0,
+      groups,
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, groups: defaultGroups() };
   }
 }
 
@@ -101,7 +117,12 @@ export async function saveNudgeSettings(s: NudgeSettings): Promise<void> {
     testMode: s.testMode !== false,
     testNumber: (s.testNumber ?? "").replace(/\D/g, "").slice(-10),
     cooldownDays: Math.min(60, Math.max(1, Math.round(Number(s.cooldownDays) || 7))),
-    perRunLimit: Math.min(500, Math.max(1, Math.round(Number(s.perRunLimit) || 100))),
+    perRunLimit: Math.min(500, Math.max(1, Math.round(Number(s.perRunLimit) || 40))),
+    excludeSalons: (Array.isArray(s.excludeSalons) ? s.excludeSalons : [])
+      .map((x) => String(x).trim())
+      .filter(Boolean)
+      .slice(0, 50),
+    rotationIndex: Math.max(0, Math.round(Number(s.rotationIndex) || 0)) % ROTATION.length,
     groups: Object.fromEntries(
       GROUPS.map((g) => {
         const c = s.groups?.[g.key] ?? DEFAULT_GROUP;
@@ -124,63 +145,67 @@ export async function saveNudgeSettings(s: NudgeSettings): Promise<void> {
 // ---------- Audience ----------
 
 export const EXCLUSIONS = {
-  opted_out: "Opted out of WhatsApp",
-  dnc: "Do Not Contact",
-  not_interested: "Latest remark: Not Interested",
-  invalid: "Latest remark: Invalid / wrong number",
   cooldown: "Already nudged recently",
-  bad_phone: "No valid phone number",
 } as const;
 export type ExclusionKey = keyof typeof EXCLUSIONS;
-
-/** Why a customer must not be nudged (first matching rule), or null if they can be. */
-export function exclusionFor(l: LeadFacts, optedOut: Set<string>, nudgedRecently: Set<string>): ExclusionKey | null {
-  const remark = l.latestRemark?.label ?? "";
-  if (optedOut.has(l.id)) return "opted_out";
-  if (l.doNotContact) return "dnc";
-  if (/not\s*interested/i.test(remark)) return "not_interested";
-  if (/invalid|wrong\s*number/i.test(remark)) return "invalid";
-  if (nudgedRecently.has(l.id)) return "cooldown";
-  if (!/^\d{10}$/.test(l.phone)) return "bad_phone";
-  return null;
-}
-
-/** Which nudge group a customer belongs to (at most one), from the same facts as Insights. */
-export function groupOf(l: LeadFacts): GroupKey | null {
-  return GROUPS.find((g) => inGroup[g.key](l))?.key ?? null;
-}
 
 export interface AudienceRow {
   lead: LeadFacts;
   excluded: ExclusionKey | null;
+  lastNudgedAt: Date | null;
 }
 
-export async function buildAudience(settings: NudgeSettings): Promise<{ groups: Record<GroupKey, AudienceRow[]> }> {
-  const since = new Date(Date.now() - settings.cooldownDays * 86_400_000);
-  const [{ leads }, optOuts, recent] = await Promise.all([
+/**
+ * Who is in each group today (from the Customer lists, re-engage date = today)
+ * and who is held back by the cooldown. Rows are in SEND order: never nudged
+ * first, then longest-ago nudged, then by phone so the order is stable.
+ */
+export async function buildAudience(
+  settings: NudgeSettings
+): Promise<{ groups: Record<GroupKey, AudienceRow[]>; blocked: number; salonOptions: string[] }> {
+  const since = Date.now() - settings.cooldownDays * 86_400_000;
+  const [{ leads }, optOuts, nudges] = await Promise.all([
     loadInsights(),
     prisma.whatsAppOptOut.findMany({ select: { customerId: true } }),
-    prisma.whatsAppMessage.findMany({
-      where: { isTest: false, status: "SENT", createdAt: { gte: since }, customerId: { not: null } },
-      select: { customerId: true },
+    prisma.whatsAppMessage.groupBy({
+      by: ["customerId"],
+      where: { isTest: false, status: "SENT", customerId: { not: null } },
+      _max: { createdAt: true },
     }),
   ]);
-  const opted = new Set(optOuts.map((o) => o.customerId));
-  const nudged = new Set(recent.map((r) => r.customerId!));
+  const lastNudged = new Map(nudges.filter((n) => n.customerId && n._max.createdAt).map((n) => [n.customerId!, n._max.createdAt!]));
+  const today = todayIsoIST();
+  const { lists } = buildNudgeLists(leads, {
+    optedOut: new Set(optOuts.map((o) => o.customerId)),
+    excludeSalons: settings.excludeSalons,
+    reengageFrom: today,
+    reengageTo: today,
+  });
 
-  const exclusionOf = (l: LeadFacts) => exclusionFor(l, opted, nudged);
+  const groups = Object.fromEntries(
+    GROUPS.map((g) => {
+      const rows: AudienceRow[] = lists[g.key].map(({ lead }) => {
+        const at = lastNudged.get(lead.id) ?? null;
+        return { lead, lastNudgedAt: at, excluded: at && at.getTime() >= since ? "cooldown" : null };
+      });
+      rows.sort(sendOrder);
+      return [g.key, rows];
+    })
+  ) as Record<GroupKey, AudienceRow[]>;
 
-  const groups = Object.fromEntries(GROUPS.map((g) => [g.key, [] as AudienceRow[]])) as Record<GroupKey, AudienceRow[]>;
-  for (const l of leads) {
-    const g = GROUPS.find((x) => inGroup[x.key](l));
-    if (!g) continue;
-    groups[g.key].push({ lead: l, excluded: exclusionOf(l) });
-  }
-  // Freshest first: most recent booking (or newest lead).
-  for (const k of Object.keys(groups) as GroupKey[]) {
-    groups[k].sort((a, b) => (b.lead.lastPaidAt ?? b.lead.joinedAt).getTime() - (a.lead.lastPaidAt ?? a.lead.joinedAt).getTime());
-  }
-  return { groups };
+  // Every salon anyone has ordered at, most used first (for the exclusion picker).
+  const salonCounts = new Map<string, number>();
+  for (const l of leads) for (const s of l.salonsEver) salonCounts.set(s, (salonCounts.get(s) ?? 0) + 1);
+  const salonOptions = Array.from(salonCounts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+
+  return { groups, blocked: lists.blocked.length, salonOptions };
+}
+
+/** Never nudged first, then the longest-ago nudged; phone as a stable tie-break. */
+export function sendOrder(a: { lead: LeadFacts; lastNudgedAt: Date | null }, b: { lead: LeadFacts; lastNudgedAt: Date | null }): number {
+  const ta = a.lastNudgedAt?.getTime() ?? 0;
+  const tb = b.lastNudgedAt?.getTime() ?? 0;
+  return ta - tb || a.lead.phone.localeCompare(b.lead.phone);
 }
 
 /** Values for {{1}}..{{n}}; any variable not configured falls back to the first name ({{1}}) or "". */
@@ -195,6 +220,16 @@ export function variablesFor(config: GroupConfig, lead: LeadFacts, variableCount
 /** Fill {{n}} in a template's text, for previews. */
 export function renderTemplate(text: string, values: string[]): string {
   return text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => values[Number(n) - 1] || `{{${n}}}`);
+}
+
+/** The count list automatic mode sends next (skipping groups that are off or have no template), or null. */
+export function nextRotationGroup(settings: NudgeSettings): { group: GroupKey; index: number } | null {
+  for (let i = 0; i < ROTATION.length; i++) {
+    const index = (settings.rotationIndex + i) % ROTATION.length;
+    const g = ROTATION[index];
+    if (settings.groups[g].enabled && settings.groups[g].templateId) return { group: g, index };
+  }
+  return null;
 }
 
 // ---------- Sending ----------
@@ -225,8 +260,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 
 /**
  * Send one group's nudge. In test mode: ONE message, to the test number only,
- * filled with the first eligible customer's details. Otherwise: every eligible
- * customer, up to perRunLimit.
+ * filled with the first eligible customer's details. Otherwise: the next
+ * `perRunLimit` eligible customers in send order.
  */
 export async function runGroup(
   group: GroupKey,
@@ -246,6 +281,7 @@ export async function runGroup(
 
   const { groups } = await buildAudience(settings);
   const eligible = groups[group].filter((r) => !r.excluded).map((r) => r.lead);
+  const label = GROUPS.find((g) => g.key === group)!.label;
 
   const log = (data: { customerId: string | null; phone: string; ok: boolean; error: string | null; response: string; isTest: boolean }) =>
     prisma.whatsAppMessage.create({
@@ -268,7 +304,9 @@ export async function runGroup(
     const sample = eligible[0];
     const variables = sample
       ? variablesFor(config, sample, template.variableCount)
-      : Array.from({ length: Math.max(template.variableCount, config.variables.length) }, (_, i) => (config.variables[i]?.source === "fixed" ? config.variables[i].text ?? "" : "Test"));
+      : Array.from({ length: Math.max(template.variableCount, config.variables.length) }, (_, i) =>
+          config.variables[i]?.source === "fixed" ? config.variables[i].text ?? "" : "Test"
+        );
     const r = await sendTemplate({ templateId: template.id, phone: settings.testNumber, name: sample?.name ?? "Test", variables });
     await log({ customerId: null, phone: settings.testNumber, ok: r.ok, error: r.error, response: r.response, isTest: true });
     return { ...base, attempted: 1, sent: r.ok ? 1 : 0, failed: r.ok ? 0 : 1, errors: r.error ? [r.error] : [] };
@@ -285,7 +323,7 @@ export async function runGroup(
           customerId: lead.id,
           userId: opts.userId,
           activityType: "NOTE_ADDED",
-          note: `WhatsApp nudge sent (${GROUPS.find((g) => g.key === group)!.label}): template "${template.name}"${opts.trigger === "automatic" ? " - automatic" : ""}`,
+          note: `WhatsApp nudge sent (${label}): template "${template.name}"${opts.trigger === "automatic" ? " - automatic" : ""}`,
         },
       });
     }
@@ -299,4 +337,25 @@ export async function runGroup(
     failed: results.filter((r) => !r.ok).length,
     errors,
   };
+}
+
+/**
+ * The daily automatic run: last25 (if switched on) + the next count list in
+ * the rotation. Moves the rotation on by one after a run that sent (or tried).
+ */
+export async function runAutomatic(): Promise<{ results: RunResult[]; rotationGroup: GroupKey | null; testMode: boolean }> {
+  const settings = await getNudgeSettings();
+  const templates = await getTemplates();
+  const results: RunResult[] = [];
+  if (settings.groups.last25.enabled) {
+    results.push(await runGroup("last25", { trigger: "automatic", userId: null, settings, templates }));
+  }
+  const next = nextRotationGroup(settings);
+  if (next) {
+    results.push(await runGroup(next.group, { trigger: "automatic", userId: null, settings, templates }));
+    // Re-read so a settings change made during the run isn't overwritten.
+    const latest = await getNudgeSettings();
+    await saveNudgeSettings({ ...latest, rotationIndex: (next.index + 1) % ROTATION.length });
+  }
+  return { results, rotationGroup: next?.group ?? null, testMode: settings.testMode };
 }

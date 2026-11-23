@@ -157,6 +157,8 @@ export interface LeadFacts {
   bookedAfterFailStatus: "Success" | "Partially Paid" | null;
   /** The team called or left a remark on or after the day of the first failure. */
   calledAfterFail: boolean;
+  /** Every salon they have ever ordered at, any payment status (for the WhatsApp salon exclusion). */
+  salonsEver: string[];
 }
 
 /**
@@ -408,6 +410,7 @@ export function buildLead(c: CustomerLite, bookings: BookingLite[], acts: ActLit
     bookedAfterFailAt: bookedAfterFail?.d ?? null,
     bookedAfterFailStatus: bookedAfterFail ? (bookedAfterFail.paymentStatus === "Partially Paid" ? "Partially Paid" : "Success") : null,
     calledAfterFail: firstFailedDay ? acts.some((a) => dayKey(a.createdAt) >= firstFailedDay) : false,
+    salonsEver: Array.from(new Set(list.map((b) => b.salon).filter((s): s is string => !!s))),
   };
 }
 

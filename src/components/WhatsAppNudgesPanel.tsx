@@ -20,6 +20,8 @@ export interface PanelSettings {
   testNumber: string;
   cooldownDays: number;
   perRunLimit: number;
+  excludeSalons: string[];
+  rotationIndex: number;
   groups: Record<string, GroupConfig>;
 }
 export interface PanelTemplate {
@@ -58,13 +60,20 @@ export default function WhatsAppNudgesPanel({
   templatesError,
   groups,
   configured,
+  salonOptions,
+  nextAutomatic,
+  blockedCount,
 }: {
   initial: PanelSettings;
   templates: PanelTemplate[];
   templatesError: string | null;
   groups: PanelGroup[];
   configured: boolean;
+  salonOptions: string[];
+  nextAutomatic: string | null;
+  blockedCount: number;
 }) {
+  const [salonSearch, setSalonSearch] = useState("");
   const router = useRouter();
   const [s, setS] = useState<PanelSettings>(initial);
   const [saving, setSaving] = useState(false);
@@ -153,10 +162,13 @@ export default function WhatsAppNudgesPanel({
                 </button>
               ))}
             </div>
+            {s.mode === "automatic" && (
+              <p className="text-xs font-medium text-blue-700 mt-2">Next rotation list: {nextAutomatic ?? "none - switch on a count list and pick its template"}</p>
+            )}
             <p className="text-xs text-slate-500 mt-2">
               {s.mode === "manual"
                 ? "Nothing is sent until an admin previews a group and clicks Send."
-                : "Every day (about 10:00 AM India time) the CRM sends each switched-on group's nudge to everyone eligible."}
+                : "Every day (about 10:00 AM India time): the \"Last booking 25 days ago\" list + ONE count list on rotation (1 time → 2 times → 3-4 times → Frequent → Never booked)."}
             </p>
           </div>
 
@@ -214,6 +226,36 @@ export default function WhatsAppNudgesPanel({
               <span className="text-[11px] text-slate-400">the rest go in the next run</span>
             </label>
           </div>
+        </div>
+        <div className="mt-4 pt-4 border-t">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Never nudge customers of these salons</p>
+          <p className="text-xs text-slate-500 mb-2">
+            Anyone who ever ordered at a ticked salon (any payment status) is left out of every list.{" "}
+            {s.excludeSalons.length > 0 ? <b>{s.excludeSalons.length} selected: {s.excludeSalons.join(", ")}</b> : "None selected."}
+          </p>
+          <input
+            value={salonSearch}
+            onChange={(e) => setSalonSearch(e.target.value)}
+            placeholder="Search salons"
+            className="w-full md:w-80 border border-gray-300 rounded-lg px-2 py-1 text-sm mb-2"
+          />
+          <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2 grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-1">
+            {salonOptions
+              .filter((n) => n.toLowerCase().includes(salonSearch.trim().toLowerCase()))
+              .map((n) => (
+                <label key={n} className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={s.excludeSalons.includes(n)}
+                    onChange={(e) => update({ excludeSalons: e.target.checked ? [...s.excludeSalons, n] : s.excludeSalons.filter((x) => x !== n) })}
+                  />
+                  <span className="truncate">{n}</span>
+                </label>
+              ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">
+            {blockedCount.toLocaleString("en-IN")} customers are in &ldquo;Do not nudge&rdquo; (Not Interested, Do Not Contact, Invalid Number or opted out) and are never messaged.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t">
           <button
@@ -366,10 +408,13 @@ export default function WhatsAppNudgesPanel({
                     ? "Sending…"
                     : s.testMode
                       ? `Send test to ${s.testNumber || "test number"}`
-                      : `Approve & send to ${Math.min(g.eligible, s.perRunLimit).toLocaleString("en-IN")} customers`}
+                      : `Approve & send to next ${Math.min(g.eligible, s.perRunLimit).toLocaleString("en-IN")}`}
                 </button>
                 <Link href={`/admin/whatsapp?group=${g.key}#preview`} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-slate-700 hover:bg-slate-50">
                   Preview who gets it
+                </Link>
+                <Link href={`/admin/whatsapp/lists?list=${g.key}`} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-slate-700 hover:bg-slate-50">
+                  Full list
                 </Link>
               </div>
             </div>
