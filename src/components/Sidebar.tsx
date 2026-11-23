@@ -24,6 +24,7 @@ import {
   TagIcon,
   LightBulbIcon,
   ShareIcon,
+  ChatBubbleLeftRightIcon,
 } from "@heroicons/react/24/outline";
 import { signOut, useSession } from "next-auth/react";
 import SelfLeaveButton from "./SelfLeaveButton";
@@ -97,6 +98,7 @@ export default function Sidebar() {
     { label: "Tracker", href: "/admin/tracker", icon: CalendarDaysIcon },
     { label: "Agent Reports", href: "/admin/reports", icon: DocumentArrowDownIcon },
     { label: "Lead Sources", href: "/admin/lead-sources", icon: TagIcon },
+    { label: "WhatsApp", href: "/admin/whatsapp", icon: ChatBubbleLeftRightIcon },
     { label: "Reassign Log", href: "/admin/reassignment-log", icon: ClipboardDocumentListIcon },
     { label: "Danger Zone", href: "/admin/danger", icon: ExclamationTriangleIcon },
     { label: "Help", href: "/admin/help", icon: QuestionMarkCircleIcon },

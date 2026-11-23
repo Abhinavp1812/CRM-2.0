@@ -16,6 +16,7 @@ import {
   TagIcon,
   LightBulbIcon,
   ShareIcon,
+  ChatBubbleLeftRightIcon,
 } from "@heroicons/react/24/outline";
 
 export default async function AdminPage() {
@@ -71,6 +72,13 @@ export default async function AdminPage() {
           color="amber"
           title="Insights"
           description="Why customers stop booking - regulars who went quiet, failed payments, salon and coupon return rates"
+        />
+        <AdminTile
+          href="/admin/whatsapp"
+          icon={ChatBubbleLeftRightIcon}
+          color="green"
+          title="WhatsApp Nudges"
+          description="Anantya.ai WhatsApp reminders per customer type - test mode, manual or automatic, with opt-outs and Not Interested excluded"
         />
         <AdminTile
           href="/admin/insights2"

@@ -87,6 +87,8 @@ model Customer {
   bookings      Booking[]
   followup      Followup?
   activities    ActivityLog[]
+  whatsappMessages WhatsAppMessage[]
+  whatsappOptOut   WhatsAppOptOut?
 
   @@index([ownerId])
   @@index([customerType])
@@ -299,4 +301,37 @@ model Setting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+// ============================================================
+// WhatsApp nudges (Anantya.ai)
+// ============================================================
+
+// One row per WhatsApp template message the CRM asked Anantya to send.
+model WhatsAppMessage {
+  id           String    @id @default(cuid())
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  phone        String                         // the number it was actually sent to (the test number in test mode)
+  group        String                         // registered | one_time | stopped | payment_failed
+  templateId   Int
+  templateName String?
+  isTest       Boolean   @default(false)      // test mode: sent to the test number, not the customer
+  trigger      String                         // manual | automatic
+  status       String                         // SENT | FAILED
+  error        String?
+  response     String?                        // raw Anantya response (trimmed), for troubleshooting
+  sentById     String?
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([createdAt])
+}
+
+// Customers who must never get WhatsApp nudges (asked to stop, etc.).
+model WhatsAppOptOut {
+  customerId  String   @id
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
 }

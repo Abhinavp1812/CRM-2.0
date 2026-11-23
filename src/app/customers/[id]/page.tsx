@@ -12,6 +12,7 @@ import LogCallButton from "@/components/LogCallButton";
 import UnflagDncButton from "@/components/UnflagDncButton";
 import Tabs from "@/components/Tabs";
 import ReassignCustomerButton from "@/components/ReassignCustomerButton";
+import WhatsAppOptOutToggle from "@/components/WhatsAppOptOutToggle";
 import { formatDateIN, formatDateTimeIN } from "@/lib/formatDate";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,24 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const totalSpend = paidBookings.reduce((sum, b) => sum + (b.grandTotal ? Number(b.grandTotal) : 0), 0);
   const waMessage = "Hi " + (customer.name ?? "") + ", this is from Style Lounge.";
 
+  // WhatsApp nudge status. Wrapped so this page keeps working even before the
+  // WhatsApp database update has been run.
+  let whatsapp: { optedOut: boolean; messages: { createdAt: Date; templateName: string | null; status: string }[] } | null = null;
+  try {
+    const [optOut, messages] = await Promise.all([
+      prisma.whatsAppOptOut.findUnique({ where: { customerId: customer.id }, select: { customerId: true } }),
+      prisma.whatsAppMessage.findMany({
+        where: { customerId: customer.id, isTest: false },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { createdAt: true, templateName: true, status: true },
+      }),
+    ]);
+    whatsapp = { optedOut: !!optOut, messages };
+  } catch {
+    whatsapp = null;
+  }
+
   return (
     <Layout>
         <div className="max-w-5xl mx-auto">
@@ -133,6 +152,17 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                   )}
                   {customer.customerIdExt && <span className="ml-3">ID: {customer.customerIdExt}</span>}
                 </p>
+                {whatsapp && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <WhatsAppOptOutToggle customerId={customer.id} optedOut={whatsapp.optedOut} canEdit={canEdit} />
+                    {whatsapp.messages.length > 0 && (
+                      <span className="text-xs text-slate-400">
+                        Last nudge: {formatDateIN(whatsapp.messages[0].createdAt)} ({whatsapp.messages[0].templateName ?? "template"},{" "}
+                        {whatsapp.messages[0].status === "SENT" ? "sent" : "failed"}) · {whatsapp.messages.length} in total
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {!customer.doNotContact && (
