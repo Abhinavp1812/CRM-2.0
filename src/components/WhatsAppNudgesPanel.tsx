@@ -40,6 +40,7 @@ export interface PanelGroup {
   eligible: number;
   excluded: { label: string; count: number }[];
   sample: { name: string; values: Record<string, string> } | null;
+  round: { round: number; total: number; covered: number; remaining: number; nextBatch: number; startsNewRound: boolean };
 }
 
 const SOURCES: { key: VariableSourceKey; label: string }[] = [
@@ -315,6 +316,18 @@ export default function WhatsAppNudgesPanel({
                 <div className="rounded-lg bg-rose-50 p-2">
                   <p className="text-lg font-bold text-rose-700">{(g.total - g.eligible).toLocaleString("en-IN")}</p>
                   <p className="text-[11px] text-rose-700/80">excluded</p>
+                </div>
+              </div>
+              <div className="mt-2">
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="font-semibold text-gray-800">Round {g.round.round}</span>
+                  <span className="text-slate-500">
+                    {g.round.covered.toLocaleString("en-IN")} of {g.round.total.toLocaleString("en-IN")} covered · next batch {g.round.nextBatch.toLocaleString("en-IN")}
+                    {g.round.startsNewRound ? " (starts round " + (g.round.round + 1) + ")" : ""}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: (g.round.total ? (100 * g.round.covered) / g.round.total : 0) + "%" }} />
                 </div>
               </div>
               {g.excluded.length > 0 && (

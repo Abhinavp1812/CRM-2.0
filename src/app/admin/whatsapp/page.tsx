@@ -5,12 +5,14 @@ import Layout from "@/components/Layout";
 import WhatsAppNudgesPanel, { type PanelGroup } from "@/components/WhatsAppNudgesPanel";
 import SegmentBadge from "@/components/SegmentBadge";
 import WhatsAppSetupDbButton from "@/components/WhatsAppSetupDbButton";
+import WhatsAppTabs from "@/components/WhatsAppTabs";
 import { prisma } from "@/lib/prisma";
 import { isAnantyaConfigured, getTemplates, type AnantyaTemplate } from "@/lib/anantya";
 import {
   getNudgeSettings,
   buildAudience,
   nextRotationGroup,
+  roundProgress,
   GROUPS,
   EXCLUSIONS,
   VARIABLE_SOURCES,
@@ -74,6 +76,7 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
       total: rows.length,
       eligible: eligible.length,
       excluded: Array.from(counts, ([label, count]) => ({ label, count })),
+      round: roundProgress(rows, settings.rounds[g.key], settings.perRunLimit),
       sample: sample ? { name: sample.name ?? "(no name)", values: Object.fromEntries(VARIABLE_SOURCES.map((v) => [v.key, v.sample(sample)])) } : null,
     };
   });
@@ -85,6 +88,7 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
   const previewAll = group && audience ? audience[group].filter((r) => (show === "excluded" ? r.excluded : !r.excluded)) : [];
   const previewRows = previewAll.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(previewAll.length / PAGE_SIZE));
+  const nextBatchSize = group && audience && show === "eligible" ? roundProgress(audience[group], settings.rounds[group], settings.perRunLimit).nextBatch : 0;
   const previewHref = (patch: { show?: string; page?: number }) =>
     `/admin/whatsapp?group=${group}&show=${patch.show ?? show}${patch.page && patch.page > 1 ? `&page=${patch.page}` : ""}#preview`;
 
@@ -92,10 +96,7 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
     <Layout>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-900">WhatsApp Nudges</h1>
-        <div className="flex gap-1 mt-2 mb-3 border-b border-gray-200">
-          <span className="px-3 py-2 text-sm font-semibold text-blue-700 border-b-2 border-blue-600">Settings &amp; sending</span>
-          <Link href="/admin/whatsapp/lists" className="px-3 py-2 text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Customer lists</Link>
-        </div>
+        <WhatsAppTabs active="settings" />
         <p className="text-sm text-slate-500 mt-1">
           Automatic WhatsApp reminders through Anantya.ai, with a different approved template for each type of customer. Customers marked Not Interested,
           Do Not Contact, Invalid Number or opted out never get them, and nobody gets more than one nudge per cooldown period.
@@ -153,41 +154,60 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
             <p className="text-xs text-slate-500 mb-2">
               {settings.testMode
                 ? "Test mode is on: a send goes only to the test number, using the first customer's details."
-                : `A send goes to the first ${settings.perRunLimit} customers in this order (most recent first); the rest go in the next run.`}
+                : `This is the queue for round ${settings.rounds[group].number}: the next send goes to the ${nextBatchSize} highlighted customers (not yet nudged this round, never-nudged first). Nobody gets a second nudge until everyone here has had one.`}
             </p>
           )}
           <div className="bg-white rounded-lg shadow overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr className="text-left text-xs font-medium text-gray-700 uppercase">
+                  {show === "eligible" && <th className="px-3 py-3">Queue</th>}
                   <th className="px-3 py-3">Customer</th>
                   <th className="px-3 py-3">Phone</th>
                   <th className="px-3 py-3">Category</th>
                   <th className="px-3 py-3">Owner</th>
                   <th className="px-3 py-3">Last booking</th>
                   <th className="px-3 py-3">Latest remark</th>
+                  <th className="px-3 py-3">Last nudged</th>
                   {show === "excluded" && <th className="px-3 py-3">Why excluded</th>}
                   <th className="px-3 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {previewRows.map(({ lead: l, excluded }) => (
-                  <tr key={l.id} className="hover:bg-gray-50">
+                {previewRows.map(({ lead: l, excluded, covered, lastNudgedAt }, i) => {
+                  const pos = (page - 1) * PAGE_SIZE + i + 1;
+                  const upNext = show === "eligible" && pos <= nextBatchSize;
+                  return (
+                  <tr key={l.id} className={upNext ? "bg-emerald-50/70" : "hover:bg-gray-50"}>
+                    {show === "eligible" && (
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        <span className="font-mono text-slate-500">#{pos}</span>{" "}
+                        {upNext ? (
+                          <span className="text-emerald-700 font-semibold">next batch</span>
+                        ) : covered ? (
+                          <span className="text-slate-400">done this round</span>
+                        ) : (
+                          <span className="text-slate-500">waiting</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-2.5 font-medium text-gray-900">{l.name ?? "(no name)"}</td>
                     <td className="px-3 py-2.5 font-mono text-gray-700">{l.phone}</td>
                     <td className="px-3 py-2.5"><SegmentBadge visits={l.visits} /></td>
                     <td className="px-3 py-2.5 text-gray-600">{l.ownerName}</td>
                     <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{l.lastPaidAt ? formatDateIN(l.lastPaidAt) : "-"}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-700">{l.latestRemark?.label ?? "-"}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">{lastNudgedAt ? formatDateIN(lastNudgedAt) : "never"}</td>
                     {show === "excluded" && <td className="px-3 py-2.5 text-xs text-rose-700">{excluded ? EXCLUSIONS[excluded] : ""}</td>}
                     <td className="px-3 py-2.5">
                       <Link href={"/customers/" + l.id} className="text-blue-600 hover:underline text-xs">Open</Link>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {previewRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-8 text-center text-slate-500">Nobody here.</td>
+                    <td colSpan={10} className="px-3 py-8 text-center text-slate-500">Nobody here.</td>
                   </tr>
                 )}
               </tbody>

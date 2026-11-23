@@ -72,8 +72,22 @@ export interface NudgeSettings {
   excludeSalons: string[];
   /** Position in ROTATION for the next automatic run. */
   rotationIndex: number;
+  /**
+   * Per list: which round we're on and when it started. A customer nudged
+   * (for real) since startedAt is "covered" this round; batches go only to
+   * customers not yet covered until everyone is, then a new round starts.
+   */
+  rounds: Record<GroupKey, RoundState>;
   groups: Record<GroupKey, GroupConfig>;
 }
+export interface RoundState {
+  number: number;
+  /** ISO timestamp. */
+  startedAt: string;
+}
+const FIRST_ROUND: RoundState = { number: 1, startedAt: "1970-01-01T00:00:00.000Z" };
+const defaultRounds = (): Record<GroupKey, RoundState> =>
+  Object.fromEntries(GROUPS.map((g) => [g.key, { ...FIRST_ROUND }])) as Record<GroupKey, RoundState>;
 
 const KEY = "whatsapp.settings";
 const DEFAULT_GROUP: GroupConfig = { enabled: false, templateId: null, variables: [] };
@@ -84,15 +98,16 @@ export const DEFAULT_SETTINGS: NudgeSettings = {
   testMode: true,
   testNumber: "",
   cooldownDays: 7,
-  perRunLimit: 40,
+  perRunLimit: 50,
   excludeSalons: [],
   rotationIndex: 0,
+  rounds: defaultRounds(),
   groups: defaultGroups(),
 };
 
 export async function getNudgeSettings(): Promise<NudgeSettings> {
   const row = await prisma.setting.findUnique({ where: { key: KEY } });
-  if (!row) return { ...DEFAULT_SETTINGS, groups: defaultGroups() };
+  if (!row) return { ...DEFAULT_SETTINGS, rounds: defaultRounds(), groups: defaultGroups() };
   try {
     const s = JSON.parse(row.value) as Partial<NudgeSettings>;
     const groups = defaultGroups();
@@ -104,10 +119,11 @@ export async function getNudgeSettings(): Promise<NudgeSettings> {
       testMode: s.testMode !== false,
       excludeSalons: Array.isArray(s.excludeSalons) ? s.excludeSalons : [],
       rotationIndex: Number.isInteger(s.rotationIndex) ? (s.rotationIndex as number) : 0,
+      rounds: { ...defaultRounds(), ...(s.rounds ?? {}) },
       groups,
     };
   } catch {
-    return { ...DEFAULT_SETTINGS, groups: defaultGroups() };
+    return { ...DEFAULT_SETTINGS, rounds: defaultRounds(), groups: defaultGroups() };
   }
 }
 
@@ -117,12 +133,19 @@ export async function saveNudgeSettings(s: NudgeSettings): Promise<void> {
     testMode: s.testMode !== false,
     testNumber: (s.testNumber ?? "").replace(/\D/g, "").slice(-10),
     cooldownDays: Math.min(60, Math.max(1, Math.round(Number(s.cooldownDays) || 7))),
-    perRunLimit: Math.min(500, Math.max(1, Math.round(Number(s.perRunLimit) || 40))),
+    perRunLimit: Math.min(500, Math.max(1, Math.round(Number(s.perRunLimit) || 50))),
     excludeSalons: (Array.isArray(s.excludeSalons) ? s.excludeSalons : [])
       .map((x) => String(x).trim())
       .filter(Boolean)
       .slice(0, 50),
     rotationIndex: Math.max(0, Math.round(Number(s.rotationIndex) || 0)) % ROTATION.length,
+    rounds: Object.fromEntries(
+      GROUPS.map((g) => {
+        const r = s.rounds?.[g.key];
+        const startedAt = r && !isNaN(Date.parse(r.startedAt)) ? new Date(r.startedAt).toISOString() : FIRST_ROUND.startedAt;
+        return [g.key, { number: Math.max(1, Math.round(Number(r?.number) || 1)), startedAt }];
+      })
+    ) as Record<GroupKey, RoundState>,
     groups: Object.fromEntries(
       GROUPS.map((g) => {
         const c = s.groups?.[g.key] ?? DEFAULT_GROUP;
@@ -153,6 +176,8 @@ export interface AudienceRow {
   lead: LeadFacts;
   excluded: ExclusionKey | null;
   lastNudgedAt: Date | null;
+  /** Already nudged (for real) in this list's current round. */
+  covered: boolean;
 }
 
 /**
@@ -188,11 +213,18 @@ export async function buildAudience(
 
   const groups = Object.fromEntries(
     GROUPS.map((g) => {
+      const roundStart = Date.parse(settings.rounds[g.key].startedAt);
       const rows: AudienceRow[] = lists[g.key].map(({ lead }) => {
         const at = lastNudged.get(lead.id) ?? null;
-        return { lead, lastNudgedAt: at, excluded: at && at.getTime() >= since ? "cooldown" : null };
+        return {
+          lead,
+          lastNudgedAt: at,
+          covered: !!at && at.getTime() >= roundStart,
+          excluded: at && at.getTime() >= since ? "cooldown" : null,
+        };
       });
-      rows.sort(sendOrder);
+      // Queue order: not yet covered this round first, then never-nudged / longest-ago.
+      rows.sort((a, b) => Number(a.covered) - Number(b.covered) || sendOrder(a, b));
       return [g.key, rows];
     })
   ) as Record<GroupKey, AudienceRow[]>;
@@ -210,6 +242,32 @@ export function sendOrder(a: { lead: LeadFacts; lastNudgedAt: Date | null }, b: 
   const ta = a.lastNudgedAt?.getTime() ?? 0;
   const tb = b.lastNudgedAt?.getTime() ?? 0;
   return ta - tb || a.lead.phone.localeCompare(b.lead.phone);
+}
+
+/**
+ * Who the next batch comes from: customers not yet nudged this round (and not
+ * in cooldown). When everyone eligible is covered, the next send starts a new
+ * round with the whole list again.
+ */
+export function roundQueue(rows: AudienceRow[]): { candidates: LeadFacts[]; startsNewRound: boolean } {
+  const eligible = rows.filter((r) => !r.excluded);
+  const notCovered = eligible.filter((r) => !r.covered);
+  if (notCovered.length === 0 && eligible.length > 0) return { candidates: eligible.map((r) => r.lead), startsNewRound: true };
+  return { candidates: notCovered.map((r) => r.lead), startsNewRound: false };
+}
+
+/** Round progress for a list card: covered = nudged this round. */
+export function roundProgress(rows: AudienceRow[], round: RoundState, perRunLimit: number) {
+  const covered = rows.filter((r) => r.covered).length;
+  const q = roundQueue(rows);
+  return {
+    round: round.number,
+    total: rows.length,
+    covered,
+    remaining: rows.length - covered,
+    nextBatch: Math.min(perRunLimit, q.candidates.length),
+    startsNewRound: q.startsNewRound,
+  };
 }
 
 /** Values for {{1}}..{{n}}; any variable not configured falls back to the first name ({{1}}) or "". */
@@ -290,7 +348,8 @@ export async function runGroup(
   if (!template) return { ...base, skippedReason: `Template #${config.templateId} was not found in Anantya.` };
 
   const { groups } = await buildAudience(settings);
-  const eligible = groups[group].filter((r) => !r.excluded).map((r) => r.lead);
+  const queue = roundQueue(groups[group]);
+  const eligible = queue.candidates;
   const label = GROUPS.find((g) => g.key === group)!.label;
 
   const log = (data: { customerId: string | null; phone: string; ok: boolean; error: string | null; response: string; isTest: boolean }) =>
@@ -323,6 +382,15 @@ export async function runGroup(
   }
 
   const batch = eligible.slice(0, settings.perRunLimit);
+  // Everyone in the list has had this round's nudge -> start the next round now,
+  // so these messages count towards it.
+  if (queue.startsNewRound && batch.length > 0) {
+    const latest = await getNudgeSettings();
+    await saveNudgeSettings({
+      ...latest,
+      rounds: { ...latest.rounds, [group]: { number: latest.rounds[group].number + 1, startedAt: new Date().toISOString() } },
+    });
+  }
   const results = await mapLimit(batch, 4, async (lead) => {
     const r = await sendTemplate({ templateId: template.id, phone: lead.phone, name: lead.name ?? "", variables: variablesFor(config, lead, template.variableCount) });
     await log({ customerId: lead.id, phone: lead.phone, ok: r.ok, error: r.error, response: r.response, isTest: false });

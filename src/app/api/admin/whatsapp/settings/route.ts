@@ -12,8 +12,12 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  // Partial updates are fine: anything not sent keeps its saved value.
+  // Partial updates are fine: anything not sent keeps its saved value. The round
+  // counters and rotation position are run by the server - never taken from the
+  // page, so a page opened before a send can't wind them back.
   const current = await getNudgeSettings();
-  await saveNudgeSettings({ ...current, ...body });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { rounds, rotationIndex, ...editable } = body;
+  await saveNudgeSettings({ ...current, ...editable });
   return NextResponse.json({ success: true, settings: await getNudgeSettings() });
 }

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import Layout from "@/components/Layout";
 import SegmentBadge from "@/components/SegmentBadge";
+import WhatsAppTabs from "@/components/WhatsAppTabs";
 import { NUDGE_LISTS, BLOCK_REASONS, isNudgeListKey, type NudgeListKey } from "@/lib/nudgeLists";
 import { parseNudgeListParams, loadNudgeListData } from "@/lib/nudgeListsData";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
@@ -45,10 +46,7 @@ export default async function NudgeListsPage({ searchParams }: { searchParams: P
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">WhatsApp Nudges</h1>
-          <div className="flex gap-1 mt-2 border-b border-gray-200">
-            <Link href="/admin/whatsapp" className="px-3 py-2 text-sm text-slate-500 hover:text-slate-800 border-b-2 border-transparent">Settings &amp; sending</Link>
-            <span className="px-3 py-2 text-sm font-semibold text-blue-700 border-b-2 border-blue-600">Customer lists</span>
-          </div>
+          <WhatsAppTabs active="lists" />
         </div>
         <a href={exportHref("all")} download className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
           Download all lists (Excel)
