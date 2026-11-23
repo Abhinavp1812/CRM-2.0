@@ -76,7 +76,7 @@ export default function WhatsAppBatchControls({ latestAt, latestIsToday, next, n
       </div>
       {note && <p className="text-sm font-medium text-slate-700 mt-3">{note}</p>}
       <p className="text-xs text-slate-500 mt-1">
-        Next batch: {next.map((x, i) => (
+        Clicking the button now gives: {next.map((x, i) => (
           <span key={x.label}>
             {i > 0 && " · "}
             {x.label} <b className="text-slate-700">{x.count.toLocaleString("en-IN")}</b>

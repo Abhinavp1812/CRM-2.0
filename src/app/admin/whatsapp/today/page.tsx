@@ -80,7 +80,7 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
       </div>
 
       <p className="text-sm text-slate-500 mb-4">
-        Works like the WA Toolbox &ldquo;Nudges for Today&rdquo;. Each click picks <b>everyone whose last booking was 25 days ago</b> plus{" "}
+        Works like the WA Toolbox &ldquo;Nudges for Today&rdquo;. Each time you click <b>Generate nudges for today</b> it picks <b>everyone whose last booking was 25 days ago</b> plus{" "}
         <b>{settings.perRunLimit} customers from ONE list</b>, taking turns: {ROTATION.map(label).join(" → ")} → back to {label(ROTATION[0])}. Then you send
         them from the <b>Anantya platform</b> (download the Excel or copy the numbers). Nothing is sent from here. Every customer picked is recorded in the
         Nudge log, so when a list&apos;s turn comes again you get its <b>next {settings.perRunLimit}</b>. Nobody repeats until the whole list has had a turn,
@@ -101,7 +101,7 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
             next={next}
             note={
               nextCategory
-                ? `This click's list: ${label(nextCategory)}${afterThat && afterThat !== nextCategory ? ` · the click after: ${label(afterThat)}` : ""}`
+                ? `Today's list: ${label(nextCategory)}${afterThat && afterThat !== nextCategory ? `  ·  next time: ${label(afterThat)}` : ""}`
                 : "Every list is in the cooldown right now - only the 25-days list can be picked."
             }
           />
