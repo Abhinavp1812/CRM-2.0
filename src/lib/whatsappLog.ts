@@ -24,7 +24,7 @@ export function parseLogParams(sp: SearchParamsRecord) {
     from,
     to,
     groups: listParam(sp.group),
-    status: status === "SENT" || status === "FAILED" ? status : null,
+    status: status === "SENT" || status === "FAILED" || status === "LISTED" ? status : null,
     /** "real" (default), "test", or "all". */
     kind: kind === "test" || kind === "all" ? kind : "real",
     q: (oneParam(sp.q) ?? "").trim(),
@@ -71,6 +71,7 @@ export async function loadLog(p: LogParams, page: number, pageSize: number) {
     total,
     sent: byStatus.find((s) => s.status === "SENT")?._count._all ?? 0,
     failed: byStatus.find((s) => s.status === "FAILED")?._count._all ?? 0,
+    listed: byStatus.find((s) => s.status === "LISTED")?._count._all ?? 0,
     customers: uniqueCustomers.length,
     byGroup: byGroup.map((g) => ({ key: g.group, label: groupLabel(g.group), count: g._count._all })).sort((a, b) => b.count - a.count),
   };

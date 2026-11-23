@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import * as XLSX from "xlsx";
 import { parseLogParams, loadLogForExport, groupLabel } from "@/lib/whatsappLog";
 import { formatDateIN, formatTimeIN } from "@/lib/formatDate";
+import { statusText, triggerText } from "@/lib/whatsappStatus";
 import { searchParamsToRecord } from "@/lib/params";
 
 export const maxDuration = 60;
@@ -19,10 +20,10 @@ export async function GET(req: Request) {
     List: groupLabel(m.group),
     Name: m.customer?.name ?? (m.isTest ? "(test)" : ""),
     "Phone Number": m.phone,
-    Template: m.templateName ?? String(m.templateId),
-    How: m.trigger === "automatic" ? "Automatic" : "Manual",
+    Template: m.templateName ?? (m.templateId ? String(m.templateId) : ""),
+    How: triggerText(m.trigger),
     Test: m.isTest ? "Yes" : "",
-    Result: m.status === "SENT" ? "Sent" : "Failed",
+    Result: statusText(m.status),
     Error: m.error ?? "",
   }));
   const wb = XLSX.utils.book_new();

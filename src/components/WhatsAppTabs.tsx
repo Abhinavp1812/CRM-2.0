@@ -3,10 +3,11 @@ import Link from "next/link";
 const TABS = [
   { key: "settings", label: "Settings & sending", href: "/admin/whatsapp" },
   { key: "lists", label: "Customer lists", href: "/admin/whatsapp/lists" },
+  { key: "today", label: "Nudges for today", href: "/admin/whatsapp/today" },
   { key: "log", label: "Nudge log", href: "/admin/whatsapp/log" },
 ] as const;
 
-/** Tab bar shared by the three Admin > WhatsApp pages. */
+/** Tab bar shared by the Admin > WhatsApp pages. */
 export default function WhatsAppTabs({ active }: { active: (typeof TABS)[number]["key"] }) {
   return (
     <div className="flex gap-1 mt-2 mb-3 border-b border-gray-200">

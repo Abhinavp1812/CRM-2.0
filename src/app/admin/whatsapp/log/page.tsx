@@ -6,6 +6,7 @@ import MultiSelect from "@/components/MultiSelect";
 import WhatsAppTabs from "@/components/WhatsAppTabs";
 import { parseLogParams, loadLog, groupLabel } from "@/lib/whatsappLog";
 import { GROUPS } from "@/lib/whatsappNudges";
+import { statusText, triggerText } from "@/lib/whatsappStatus";
 import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
 import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
 
@@ -50,7 +51,7 @@ export default async function NudgeLogPage({ searchParams }: { searchParams: Pro
         </a>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        Every WhatsApp nudge the CRM sent (or tried to), batch by batch - who got which list&apos;s message, when, and whether Anantya accepted it. Test messages
+        Every WhatsApp nudge, batch by batch - who got which list&apos;s message and when: sent by the CRM (and whether Anantya accepted it) or listed in &ldquo;Nudges for today&rdquo; to send from Anantya. Test messages
         are hidden unless you choose them.
       </p>
 
@@ -67,9 +68,10 @@ export default async function NudgeLogPage({ searchParams }: { searchParams: Pro
           </Field>
           <Field label="Result">
             <select name="status" defaultValue={p.status ?? ""} className="w-full border rounded-lg px-2 py-1.5 text-sm">
-              <option value="">Sent & failed</option>
+              <option value="">All</option>
               <option value="SENT">Sent</option>
               <option value="FAILED">Failed</option>
+              <option value="LISTED">Listed (Nudges for today)</option>
             </select>
           </Field>
           <Field label="Messages">
@@ -114,10 +116,11 @@ export default async function NudgeLogPage({ searchParams }: { searchParams: Pro
       ) : (
         data && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
               <Stat label="Messages" value={data.total} />
               <Stat label="Sent" value={data.sent} tone="good" />
               <Stat label="Failed" value={data.failed} tone="bad" />
+              <Stat label="Listed (send in Anantya)" value={data.listed} />
               <Stat label="Different customers" value={data.customers} />
             </div>
             {data.byGroup.length > 0 && (
@@ -151,14 +154,16 @@ export default async function NudgeLogPage({ searchParams }: { searchParams: Pro
                         )}
                       </td>
                       <td className="px-3 py-2 font-mono text-gray-700">{m.phone}</td>
-                      <td className="px-3 py-2 text-xs text-gray-700">{m.templateName ?? "#" + m.templateId}</td>
+                      <td className="px-3 py-2 text-xs text-gray-700">{m.templateName ?? (m.templateId ? "#" + m.templateId : "-")}</td>
                       <td className="px-3 py-2 text-xs">
                         {m.isTest && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 mr-1">TEST</span>}
-                        {m.trigger === "automatic" ? "Automatic" : "Manual"}
+                        {triggerText(m.trigger)}
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {m.status === "SENT" ? (
                           <span className="text-emerald-700 font-medium">Sent</span>
+                        ) : m.status === "LISTED" ? (
+                          <span className="text-blue-700">{statusText(m.status)}</span>
                         ) : (
                           <span className="text-red-600" title={m.error ?? ""}>Failed{m.error ? ": " + m.error.slice(0, 80) : ""}</span>
                         )}

@@ -21,6 +21,7 @@ import {
   type GroupKey,
 } from "@/lib/whatsappNudges";
 import { formatDateIN, formatDateTimeIN } from "@/lib/formatDate";
+import { statusText, triggerText } from "@/lib/whatsappStatus";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -257,13 +258,13 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
                   </td>
                   <td className="px-3 py-2 font-mono text-gray-700">{m.phone}</td>
                   <td className="px-3 py-2 text-gray-600 text-xs">{GROUPS.find((g) => g.key === m.group)?.label ?? m.group}</td>
-                  <td className="px-3 py-2 text-gray-700 text-xs">{m.templateName ?? "#" + m.templateId}</td>
+                  <td className="px-3 py-2 text-gray-700 text-xs">{m.templateName ?? (m.templateId ? "#" + m.templateId : "-")}</td>
                   <td className="px-3 py-2 text-xs">
                     {m.isTest && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 mr-1">TEST</span>}
-                    {m.trigger === "automatic" ? "Automatic" : "Manual"}
+                    {triggerText(m.trigger)}
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {m.status === "SENT" ? <span className="text-emerald-700 font-medium">Sent</span> : <span className="text-red-600" title={m.error ?? ""}>Failed{m.error ? ": " + m.error.slice(0, 80) : ""}</span>}
+                    {m.status === "SENT" ? <span className="text-emerald-700 font-medium">Sent</span> : m.status === "LISTED" ? <span className="text-blue-700">{statusText(m.status)}</span> : <span className="text-red-600" title={m.error ?? ""}>Failed{m.error ? ": " + m.error.slice(0, 80) : ""}</span>}
                   </td>
                 </tr>
               ))}

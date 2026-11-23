@@ -3,6 +3,7 @@ import { loadInsights, type LeadFacts } from "@/lib/insights";
 import { getTemplates, sendTemplate, type AnantyaTemplate } from "@/lib/anantya";
 import { buildNudgeLists, NUDGE_LISTS } from "@/lib/nudgeLists";
 import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { NUDGED_STATUSES, BATCH_TRIGGER } from "@/lib/whatsappStatus";
 
 /**
  * WhatsApp nudges via Anantya.ai - sending side of Admin > WhatsApp.
@@ -197,7 +198,7 @@ export async function buildAudience(
     prisma.whatsAppMessage
       .groupBy({
         by: ["customerId"],
-        where: { isTest: false, status: "SENT", customerId: { not: null } },
+        where: { isTest: false, status: { in: NUDGED_STATUSES }, customerId: { not: null } },
         _max: { createdAt: true },
       })
       .catch(() => [] as { customerId: string | null; _max: { createdAt: Date | null } }[]),
@@ -436,4 +437,114 @@ export async function runAutomatic(): Promise<{ results: RunResult[]; rotationGr
     await saveNudgeSettings({ ...latest, rotationIndex: (next.index + 1) % ROTATION.length });
   }
   return { results, rotationGroup: next?.group ?? null, testMode: settings.testMode };
+}
+
+// ---------- "Nudges for today" (manual batches, like the WA Toolbox) ----------
+
+/** Section order on the page and in Excel: the 25-days list, then the count lists. */
+export const BATCH_SECTIONS: GroupKey[] = ["last25", "one", "two", "three", "frequent", "never"];
+
+/**
+ * Who goes in the next batch:
+ * - last25: everyone due today (not nudged within the cooldown).
+ * - every count list: the next `batchSize` from its round queue - customers not
+ *   yet in this round's batches, never-nudged first. When a whole list has been
+ *   covered, the batch starts the next round from the top.
+ */
+export function planBatch(groups: Record<GroupKey, AudienceRow[]>, batchSize: number): { sections: Record<GroupKey, LeadFacts[]>; newRounds: GroupKey[] } {
+  const sections = {} as Record<GroupKey, LeadFacts[]>;
+  const newRounds: GroupKey[] = [];
+  for (const g of BATCH_SECTIONS) {
+    if (g === "last25") {
+      sections[g] = groups[g].filter((r) => !r.excluded).map((r) => r.lead);
+      continue;
+    }
+    const q = roundQueue(groups[g]);
+    sections[g] = q.candidates.slice(0, batchSize);
+    if (q.startsNewRound && sections[g].length > 0) newRounds.push(g);
+  }
+  return { sections, newRounds };
+}
+
+export interface BatchResult {
+  /** ISO time of the batch (every row in it has this createdAt). */
+  at: string | null;
+  counts: Record<GroupKey, number>;
+  newRounds: GroupKey[];
+  skippedReason?: string;
+}
+
+/**
+ * Generate the next batch: picks the customers (planBatch) and records each one
+ * in the nudge log as LISTED, so they count as nudged - the next click gives the
+ * next customers, and the cooldown keeps the CRM's own sending off them too.
+ * Nothing is sent from here; the team sends from the Anantya platform.
+ */
+export async function generateBatch(userId: string | null): Promise<BatchResult> {
+  const empty = Object.fromEntries(BATCH_SECTIONS.map((g) => [g, 0])) as Record<GroupKey, number>;
+  const tablesReady = await prisma.whatsAppMessage.count({ take: 1 }).then(
+    () => true,
+    () => false
+  );
+  if (!tablesReady) return { at: null, counts: empty, newRounds: [], skippedReason: "The WhatsApp tables aren't in the database yet - click \"Create WhatsApp tables now\" on Settings & sending." };
+
+  const settings = await getNudgeSettings();
+  const { groups } = await buildAudience(settings);
+  const { sections, newRounds } = planBatch(groups, settings.perRunLimit);
+  const total = BATCH_SECTIONS.reduce((n, g) => n + sections[g].length, 0);
+  if (total === 0) return { at: null, counts: empty, newRounds: [], skippedReason: "Nobody to nudge right now - everyone is in the cooldown." };
+
+  const at = new Date();
+  if (newRounds.length) {
+    // Re-read so a settings change made meanwhile isn't overwritten. startedAt = at,
+    // so this batch is the first of the new round.
+    const latest = await getNudgeSettings();
+    const rounds = { ...latest.rounds };
+    for (const g of newRounds) rounds[g] = { number: rounds[g].number + 1, startedAt: at.toISOString() };
+    await saveNudgeSettings({ ...latest, rounds });
+  }
+  await prisma.whatsAppMessage.createMany({
+    data: BATCH_SECTIONS.flatMap((g) =>
+      sections[g].map((lead) => ({
+        customerId: lead.id,
+        phone: lead.phone,
+        group: g,
+        templateId: 0,
+        templateName: null,
+        isTest: false,
+        trigger: BATCH_TRIGGER,
+        status: "LISTED",
+        sentById: userId,
+        createdAt: at,
+      }))
+    ),
+  });
+  return { at: at.toISOString(), counts: Object.fromEntries(BATCH_SECTIONS.map((g) => [g, sections[g].length])) as Record<GroupKey, number>, newRounds };
+}
+
+/** Past batches, newest first: when, and how many customers. */
+export async function loadBatchHistory(take = 30): Promise<{ at: Date; count: number }[]> {
+  const rows = await prisma.whatsAppMessage.groupBy({
+    by: ["createdAt"],
+    where: { trigger: BATCH_TRIGGER, status: "LISTED" },
+    _count: { _all: true },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  return rows.map((r) => ({ at: r.createdAt, count: r._count._all }));
+}
+
+/** Every customer in one batch. */
+export function loadBatchRows(at: Date) {
+  return prisma.whatsAppMessage.findMany({
+    where: { trigger: BATCH_TRIGGER, status: "LISTED", createdAt: at },
+    orderBy: { createdAt: "asc" },
+    include: { customer: { select: { id: true, name: true } } },
+  });
+}
+
+/** Undo a batch made by mistake: those customers go back to the front of their queues. */
+export async function deleteBatch(at: Date): Promise<number> {
+  const r = await prisma.whatsAppMessage.deleteMany({ where: { trigger: BATCH_TRIGGER, status: "LISTED", createdAt: at } });
+  return r.count;
 }

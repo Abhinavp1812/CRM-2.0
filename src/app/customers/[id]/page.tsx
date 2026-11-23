@@ -157,8 +157,11 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                     <WhatsAppOptOutToggle customerId={customer.id} optedOut={whatsapp.optedOut} canEdit={canEdit} />
                     {whatsapp.messages.length > 0 && (
                       <span className="text-xs text-slate-400">
-                        Last nudge: {formatDateIN(whatsapp.messages[0].createdAt)} ({whatsapp.messages[0].templateName ?? "template"},{" "}
-                        {whatsapp.messages[0].status === "SENT" ? "sent" : "failed"}) · {whatsapp.messages.length} in total
+                        Last nudge: {formatDateIN(whatsapp.messages[0].createdAt)} (
+                        {whatsapp.messages[0].status === "LISTED"
+                          ? "in Nudges for today"
+                          : `${whatsapp.messages[0].templateName ?? "template"}, ${whatsapp.messages[0].status === "SENT" ? "sent" : "failed"}`}
+                        ) · {whatsapp.messages.length} in total
                       </span>
                     )}
                   </div>
