@@ -14,6 +14,7 @@ import {
   loadBatchHistory,
   loadBatchRows,
   BATCH_SECTIONS,
+  ROTATION,
   GROUPS,
   type GroupKey,
 } from "@/lib/whatsappNudges";
@@ -51,8 +52,15 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
   const facts = new Map<string, LeadFacts>();
   for (const g of BATCH_SECTIONS) for (const r of groups[g]) facts.set(r.lead.id, r.lead);
 
-  const plan = planBatch(groups, settings.perRunLimit);
-  const next = BATCH_SECTIONS.map((g) => ({ label: label(g), count: plan.sections[g].length, newRound: plan.newRounds.includes(g) }));
+  const plan = planBatch(groups, settings.perRunLimit, settings.batchRotationIndex);
+  const next = [
+    { label: label("last25"), count: plan.sections.last25.length, newRound: false },
+    ...(plan.category ? [{ label: label(plan.category), count: plan.sections[plan.category].length, newRound: plan.newRounds.includes(plan.category) }] : []),
+  ];
+  const nextCategory = plan.category;
+  const afterThat = nextCategory ? ROTATION[(ROTATION.indexOf(nextCategory) + 1) % ROTATION.length] : null;
+  // Sections to show: the 25-days list always, plus whichever list(s) the batch used.
+  const sectionsShown = BATCH_SECTIONS.filter((g) => g === "last25" || rows.some((r) => r.group === g));
   const latestIsToday = !!latest && latest.at >= istDayRange(todayIsoIST()).start;
   const exportHref = (group?: GroupKey) =>
     "/api/admin/whatsapp/today/export?" + new URLSearchParams({ ...(selected ? { at: selected.at.toISOString() } : {}), ...(group ? { group } : {}) }).toString();
@@ -72,11 +80,12 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
       </div>
 
       <p className="text-sm text-slate-500 mb-4">
-        Works like the WA Toolbox &ldquo;Nudges for Today&rdquo;. Each click picks <b>everyone whose last booking was 25 days ago</b> plus the{" "}
-        <b>next {settings.perRunLimit} customers from every list</b> (1 time, 2 times, 3-4 times, frequent, never booked). Then you send them from the{" "}
-        <b>Anantya platform</b> (download the Excel or copy the numbers). Nothing is sent from here. Every customer picked is recorded in the Nudge log, so the
-        next click gives the <b>next {settings.perRunLimit}</b>. Nobody repeats until the whole list has had a turn, then that list starts again from the top
-        (a new round). Do-not-nudge customers and excluded salons are never picked, and nobody is picked twice within {settings.cooldownDays} days.
+        Works like the WA Toolbox &ldquo;Nudges for Today&rdquo;. Each click picks <b>everyone whose last booking was 25 days ago</b> plus{" "}
+        <b>{settings.perRunLimit} customers from ONE list</b>, taking turns: {ROTATION.map(label).join(" → ")} → back to {label(ROTATION[0])}. Then you send
+        them from the <b>Anantya platform</b> (download the Excel or copy the numbers). Nothing is sent from here. Every customer picked is recorded in the
+        Nudge log, so when a list&apos;s turn comes again you get its <b>next {settings.perRunLimit}</b>. Nobody repeats until the whole list has had a turn,
+        then that list starts again from the top (a new round). Do-not-nudge customers and excluded salons are never picked, and nobody is picked twice within{" "}
+        {settings.cooldownDays} days.
       </p>
 
       {!history.ok ? (
@@ -86,7 +95,16 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
         </div>
       ) : (
         <>
-          <WhatsAppBatchControls latestAt={latest ? latest.at.toISOString() : null} latestIsToday={latestIsToday} next={next} />
+          <WhatsAppBatchControls
+            latestAt={latest ? latest.at.toISOString() : null}
+            latestIsToday={latestIsToday}
+            next={next}
+            note={
+              nextCategory
+                ? `This click's list: ${label(nextCategory)}${afterThat && afterThat !== nextCategory ? ` · the click after: ${label(afterThat)}` : ""}`
+                : "Every list is in the cooldown right now - only the 25-days list can be picked."
+            }
+          />
 
           {history.h.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
@@ -119,7 +137,7 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
               </h2>
               <p className="text-xs text-slate-500 mb-3">Send each list its own template from Anantya. Numbers are 10 digits; the Excel also has them with 91 in front.</p>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {BATCH_SECTIONS.map((g) => {
+                {sectionsShown.map((g) => {
                   const list = rows
                     .filter((r) => r.group === g)
                     .sort((a, b) => (a.customer?.name ?? "").localeCompare(b.customer?.name ?? ""));

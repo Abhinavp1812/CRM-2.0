@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   // page, so a page opened before a send can't wind them back.
   const current = await getNudgeSettings();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { rounds, rotationIndex, ...editable } = body;
+  const { rounds, rotationIndex, batchRotationIndex, ...editable } = body;
   await saveNudgeSettings({ ...current, ...editable });
   return NextResponse.json({ success: true, settings: await getNudgeSettings() });
 }

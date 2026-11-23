@@ -73,6 +73,8 @@ export interface NudgeSettings {
   excludeSalons: string[];
   /** Position in ROTATION for the next automatic run. */
   rotationIndex: number;
+  /** Position in ROTATION for the next "Nudges for today" batch. */
+  batchRotationIndex: number;
   /**
    * Per list: which round we're on and when it started. A customer nudged
    * (for real) since startedAt is "covered" this round; batches go only to
@@ -102,6 +104,7 @@ export const DEFAULT_SETTINGS: NudgeSettings = {
   perRunLimit: 50,
   excludeSalons: [],
   rotationIndex: 0,
+  batchRotationIndex: 0,
   rounds: defaultRounds(),
   groups: defaultGroups(),
 };
@@ -120,6 +123,7 @@ export async function getNudgeSettings(): Promise<NudgeSettings> {
       testMode: s.testMode !== false,
       excludeSalons: Array.isArray(s.excludeSalons) ? s.excludeSalons : [],
       rotationIndex: Number.isInteger(s.rotationIndex) ? (s.rotationIndex as number) : 0,
+      batchRotationIndex: Number.isInteger(s.batchRotationIndex) ? (s.batchRotationIndex as number) : 0,
       rounds: { ...defaultRounds(), ...(s.rounds ?? {}) },
       groups,
     };
@@ -140,6 +144,7 @@ export async function saveNudgeSettings(s: NudgeSettings): Promise<void> {
       .filter(Boolean)
       .slice(0, 50),
     rotationIndex: Math.max(0, Math.round(Number(s.rotationIndex) || 0)) % ROTATION.length,
+    batchRotationIndex: Math.max(0, Math.round(Number(s.batchRotationIndex) || 0)) % ROTATION.length,
     rounds: Object.fromEntries(
       GROUPS.map((g) => {
         const r = s.rounds?.[g.key];
@@ -445,31 +450,38 @@ export async function runAutomatic(): Promise<{ results: RunResult[]; rotationGr
 export const BATCH_SECTIONS: GroupKey[] = ["last25", "one", "two", "three", "frequent", "never"];
 
 /**
- * Who goes in the next batch:
- * - last25: everyone due today (not nudged within the cooldown).
- * - every count list: the next `batchSize` from its round queue - customers not
- *   yet in this round's batches, never-nudged first. When a whole list has been
- *   covered, the batch starts the next round from the top.
+ * Who goes in the next batch (like the WA Toolbox "Nudges for Today"):
+ * - last25: everyone due today (not nudged within the cooldown), every time.
+ * - ONE count list, in turn (1 time -> 2 times -> 3-4 times -> frequent ->
+ *   never booked): the next `batchSize` from its round queue - customers not yet
+ *   in this round's batches, never-nudged first. When the whole list has been
+ *   covered, it starts the next round from the top. A list with nobody
+ *   available today (all in cooldown) is skipped for the next one.
  */
-export function planBatch(groups: Record<GroupKey, AudienceRow[]>, batchSize: number): { sections: Record<GroupKey, LeadFacts[]>; newRounds: GroupKey[] } {
-  const sections = {} as Record<GroupKey, LeadFacts[]>;
-  const newRounds: GroupKey[] = [];
-  for (const g of BATCH_SECTIONS) {
-    if (g === "last25") {
-      sections[g] = groups[g].filter((r) => !r.excluded).map((r) => r.lead);
-      continue;
-    }
+export function planBatch(
+  groups: Record<GroupKey, AudienceRow[]>,
+  batchSize: number,
+  rotationIndex: number
+): { sections: Record<GroupKey, LeadFacts[]>; newRounds: GroupKey[]; category: GroupKey | null; categoryIndex: number } {
+  const sections = Object.fromEntries(BATCH_SECTIONS.map((g) => [g, [] as LeadFacts[]])) as Record<GroupKey, LeadFacts[]>;
+  sections.last25 = groups.last25.filter((r) => !r.excluded).map((r) => r.lead);
+  for (let i = 0; i < ROTATION.length; i++) {
+    const index = (((rotationIndex + i) % ROTATION.length) + ROTATION.length) % ROTATION.length;
+    const g = ROTATION[index];
     const q = roundQueue(groups[g]);
+    if (q.candidates.length === 0) continue;
     sections[g] = q.candidates.slice(0, batchSize);
-    if (q.startsNewRound && sections[g].length > 0) newRounds.push(g);
+    return { sections, newRounds: q.startsNewRound ? [g] : [], category: g, categoryIndex: index };
   }
-  return { sections, newRounds };
+  return { sections, newRounds: [], category: null, categoryIndex: rotationIndex % ROTATION.length };
 }
 
 export interface BatchResult {
   /** ISO time of the batch (every row in it has this createdAt). */
   at: string | null;
   counts: Record<GroupKey, number>;
+  /** The count list this batch came from. */
+  category: GroupKey | null;
   newRounds: GroupKey[];
   skippedReason?: string;
 }
@@ -486,22 +498,27 @@ export async function generateBatch(userId: string | null): Promise<BatchResult>
     () => true,
     () => false
   );
-  if (!tablesReady) return { at: null, counts: empty, newRounds: [], skippedReason: "The WhatsApp tables aren't in the database yet - click \"Create WhatsApp tables now\" on Settings & sending." };
+  if (!tablesReady) return { at: null, counts: empty, category: null, newRounds: [], skippedReason: "The WhatsApp tables aren't in the database yet - click \"Create WhatsApp tables now\" on Settings & sending." };
 
   const settings = await getNudgeSettings();
   const { groups } = await buildAudience(settings);
-  const { sections, newRounds } = planBatch(groups, settings.perRunLimit);
+  const { sections, newRounds, category, categoryIndex } = planBatch(groups, settings.perRunLimit, settings.batchRotationIndex);
   const total = BATCH_SECTIONS.reduce((n, g) => n + sections[g].length, 0);
-  if (total === 0) return { at: null, counts: empty, newRounds: [], skippedReason: "Nobody to nudge right now - everyone is in the cooldown." };
+  if (total === 0) return { at: null, counts: empty, category: null, newRounds: [], skippedReason: "Nobody to nudge right now - everyone is in the cooldown." };
 
   const at = new Date();
-  if (newRounds.length) {
-    // Re-read so a settings change made meanwhile isn't overwritten. startedAt = at,
-    // so this batch is the first of the new round.
+  {
+    // Re-read so a settings change made meanwhile isn't overwritten. A new round's
+    // startedAt = at, so this batch is the first of it. The next batch moves on to
+    // the next list (only once a list was actually used).
     const latest = await getNudgeSettings();
     const rounds = { ...latest.rounds };
     for (const g of newRounds) rounds[g] = { number: rounds[g].number + 1, startedAt: at.toISOString() };
-    await saveNudgeSettings({ ...latest, rounds });
+    await saveNudgeSettings({
+      ...latest,
+      rounds,
+      batchRotationIndex: category ? (categoryIndex + 1) % ROTATION.length : latest.batchRotationIndex,
+    });
   }
   await prisma.whatsAppMessage.createMany({
     data: BATCH_SECTIONS.flatMap((g) =>
@@ -519,7 +536,7 @@ export async function generateBatch(userId: string | null): Promise<BatchResult>
       }))
     ),
   });
-  return { at: at.toISOString(), counts: Object.fromEntries(BATCH_SECTIONS.map((g) => [g, sections[g].length])) as Record<GroupKey, number>, newRounds };
+  return { at: at.toISOString(), counts: Object.fromEntries(BATCH_SECTIONS.map((g) => [g, sections[g].length])) as Record<GroupKey, number>, category, newRounds };
 }
 
 /** Past batches, newest first: when, and how many customers. */
@@ -545,6 +562,14 @@ export function loadBatchRows(at: Date) {
 
 /** Undo a batch made by mistake: those customers go back to the front of their queues. */
 export async function deleteBatch(at: Date): Promise<number> {
-  const r = await prisma.whatsAppMessage.deleteMany({ where: { trigger: BATCH_TRIGGER, status: "LISTED", createdAt: at } });
+  const where = { trigger: BATCH_TRIGGER, status: "LISTED", createdAt: at };
+  const used = await prisma.whatsAppMessage.findFirst({ where: { ...where, group: { in: ROTATION } }, select: { group: true } });
+  const r = await prisma.whatsAppMessage.deleteMany({ where });
+  // Give the turn back to the list this batch came from.
+  const index = used ? ROTATION.indexOf(used.group as GroupKey) : -1;
+  if (index >= 0) {
+    const latest = await getNudgeSettings();
+    await saveNudgeSettings({ ...latest, batchRotationIndex: index });
+  }
   return r.count;
 }

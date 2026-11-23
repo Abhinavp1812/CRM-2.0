@@ -9,17 +9,19 @@ interface Props {
   latestIsToday: boolean;
   /** What the next click will pick, per list. */
   next: { label: string; count: number; newRound: boolean }[];
+  /** Which list this click uses / the next one. */
+  note?: string;
 }
 
 /** "Generate nudges for today" + undo of the latest batch. */
-export default function WhatsAppBatchControls({ latestAt, latestIsToday, next }: Props) {
+export default function WhatsAppBatchControls({ latestAt, latestIsToday, next, note }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<"gen" | "undo" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const total = next.reduce((n, x) => n + x.count, 0);
 
   async function generate() {
-    if (latestIsToday && !confirm("A batch was already generated today. Generate the NEXT batch as well? (The customers will be different.)")) return;
+    if (latestIsToday && !confirm("A batch was already generated today. Generate the NEXT one as well? (It moves on to the next list.)")) return;
     setBusy("gen");
     setError(null);
     try {
@@ -72,7 +74,8 @@ export default function WhatsAppBatchControls({ latestAt, latestIsToday, next }:
         )}
         {error && <span className="text-sm text-red-600 font-medium">{error}</span>}
       </div>
-      <p className="text-xs text-slate-500 mt-3">
+      {note && <p className="text-sm font-medium text-slate-700 mt-3">{note}</p>}
+      <p className="text-xs text-slate-500 mt-1">
         Next batch: {next.map((x, i) => (
           <span key={x.label}>
             {i > 0 && " · "}
