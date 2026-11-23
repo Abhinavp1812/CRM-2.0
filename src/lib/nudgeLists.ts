@@ -10,8 +10,9 @@ import { dayKey, type LeadFacts } from "@/lib/insights";
  *   two       2 visits
  *   three     3-4 visits
  *   frequent  5+ visits
- *   last25    last paid visit exactly 25 days before the "re-engage on" date(s) -
- *             in ADDITION to their count list (like the WA Toolbox default)
+ *   last25    last paid visit exactly 25 days before the "re-engage on" date(s)
+ *             - and ONLY there: they are taken out of their count list, so every
+ *             customer is in exactly one list
  *   blocked   do not nudge: opted out, Do Not Contact, latest remark Not Interested /
  *             Invalid number. They're left out of every other list.
  *
@@ -20,7 +21,7 @@ import { dayKey, type LeadFacts } from "@/lib/insights";
  */
 
 export const NUDGE_LISTS = [
-  { key: "last25", label: "Last booking 25 days ago", help: "Last paid visit exactly 25 days before the re-engage date. They're also in their count list." },
+  { key: "last25", label: "Last booking 25 days ago", help: "Last paid visit exactly 25 days before the re-engage date. Shown only here, not in their count list." },
   { key: "never", label: "Never booked", help: "Registered, no paid booking yet." },
   { key: "one", label: "1 time", help: "Exactly 1 paid visit." },
   { key: "two", label: "2 times", help: "Exactly 2 paid visits." },
@@ -102,11 +103,11 @@ export function buildNudgeLists(leads: LeadFacts[], o: NudgeListOptions) {
       salonExcluded++;
       continue;
     }
-    lists[bucket].push({ lead: l, blocked: null });
-    if (l.lastPaidAt) {
-      const d = dayKey(l.lastPaidAt);
-      if (d >= lastFrom && d <= lastTo) lists.last25.push({ lead: l, blocked: null });
-    }
+    // Every customer lands in exactly ONE list: the 25-days list takes them out
+    // of their count list, so nobody is ever in two tabs (or messaged twice a day).
+    const d = l.lastPaidAt ? dayKey(l.lastPaidAt) : null;
+    if (d && d >= lastFrom && d <= lastTo) lists.last25.push({ lead: l, blocked: null });
+    else lists[bucket].push({ lead: l, blocked: null });
   }
 
   // Most recent booking first; never-booked by newest lead.

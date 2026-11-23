@@ -56,8 +56,8 @@ export default async function NudgeListsPage({ searchParams }: { searchParams: P
       </div>
 
       <p className="text-sm text-slate-500 mb-4">
-        Who to nudge, by how many paid visits they&apos;ve made (Success / Partially Paid, not cancelled; several orders on one day = one visit). Each customer is in
-        exactly one count list. Customers marked Not Interested, Do Not Contact, Invalid Number or opted out are only in &ldquo;Do not nudge&rdquo;.
+        Who to nudge, by how many paid visits they&apos;ve made (Success / Partially Paid, not cancelled; several orders on one day = one visit). <b>Every customer appears in exactly one tab</b>: someone whose last booking was 25 days ago is only in that
+        tab, and customers marked Not Interested, Do Not Contact, Invalid Number or opted out are only in &ldquo;Do not nudge&rdquo;.
       </p>
 
       {/* Filters */}
