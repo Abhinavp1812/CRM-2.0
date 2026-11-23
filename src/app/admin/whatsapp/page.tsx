@@ -42,22 +42,21 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
     }
   }
 
-  // The two WhatsApp tables come from a database update; if it hasn't been run
-  // yet, show how instead of breaking the page.
-  let audience: Record<GroupKey, AudienceRow[]> | null = null;
-  let blockedCount = 0;
-  let salonOptions: string[] = [];
-  let recent: Awaited<ReturnType<typeof loadRecent>> = [];
-  let dbError: string | null = null;
-  try {
-    const [a, r] = await Promise.all([buildAudience(settings), loadRecent()]);
-    audience = a.groups;
-    blockedCount = a.blocked;
-    salonOptions = Array.from(new Set([...settings.excludeSalons, ...a.salonOptions]));
-    recent = r;
-  } catch (e) {
-    dbError = e instanceof Error ? e.message : "Database error";
-  }
+  // The lists work from customer data alone; the two WhatsApp tables (message
+  // log, opt-outs) come from a database update that runs on deploy. If they're
+  // missing, everything else still shows and a banner explains.
+  const [a, recentResult] = await Promise.all([
+    buildAudience(settings),
+    loadRecent().then(
+      (rows) => ({ rows, error: null as string | null }),
+      (e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof loadRecent>>, error: e instanceof Error ? e.message : "Database error" })
+    ),
+  ]);
+  const recent = recentResult.rows;
+  const dbError = recentResult.error;
+  const audience: Record<GroupKey, AudienceRow[]> = a.groups;
+  const blockedCount = a.blocked;
+  const salonOptions = Array.from(new Set([...settings.excludeSalons, ...a.salonOptions]));
   const next = nextRotationGroup(settings);
   const nextAutomatic = next ? GROUPS.find((g) => g.key === next.group)!.label : null;
 
@@ -111,9 +110,10 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
 
       {dbError && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 mb-5">
-          <b>The WhatsApp tables aren&apos;t in the database yet.</b> Run the one-time database update (on the AWS server:{" "}
-          <code className="bg-red-100 px-1 rounded">cd ~/crm && npx prisma migrate deploy</code>), then reload this page.
-          <div className="text-xs text-red-600 mt-1 break-all">{dbError.slice(0, 300)}</div>
+          <b>The WhatsApp message log isn&apos;t in the database yet.</b> It&apos;s created automatically when Vercel deploys the latest code - check that the
+          newest deployment finished as &ldquo;Ready&rdquo; (if it shows &ldquo;Error&rdquo;, the build log says why). Until then you can set things up, but sending is
+          blocked.
+          <div className="text-xs text-red-600 mt-1 break-all">{String(dbError).slice(0, 300)}</div>
         </div>
       )}
 

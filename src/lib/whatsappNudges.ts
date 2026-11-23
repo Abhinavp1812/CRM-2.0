@@ -164,14 +164,18 @@ export async function buildAudience(
   settings: NudgeSettings
 ): Promise<{ groups: Record<GroupKey, AudienceRow[]>; blocked: number; salonOptions: string[] }> {
   const since = Date.now() - settings.cooldownDays * 86_400_000;
+  // The WhatsApp tables are read defensively so the lists, counts and salon
+  // picker still work before the database update has created them.
   const [{ leads }, optOuts, nudges] = await Promise.all([
     loadInsights(),
-    prisma.whatsAppOptOut.findMany({ select: { customerId: true } }),
-    prisma.whatsAppMessage.groupBy({
-      by: ["customerId"],
-      where: { isTest: false, status: "SENT", customerId: { not: null } },
-      _max: { createdAt: true },
-    }),
+    prisma.whatsAppOptOut.findMany({ select: { customerId: true } }).catch(() => [] as { customerId: string }[]),
+    prisma.whatsAppMessage
+      .groupBy({
+        by: ["customerId"],
+        where: { isTest: false, status: "SENT", customerId: { not: null } },
+        _max: { createdAt: true },
+      })
+      .catch(() => [] as { customerId: string | null; _max: { createdAt: Date | null } }[]),
   ]);
   const lastNudged = new Map(nudges.filter((n) => n.customerId && n._max.createdAt).map((n) => [n.customerId!, n._max.createdAt!]));
   const today = todayIsoIST();
@@ -271,6 +275,12 @@ export async function runGroup(
   const config = settings.groups[group];
   const base: RunResult = { group, isTest: settings.testMode, attempted: 0, sent: 0, failed: 0, errors: [] };
 
+  // Never send anything that can't be logged - the log is what enforces the cooldown.
+  const tablesReady = await prisma.whatsAppMessage.count({ take: 1 }).then(
+    () => true,
+    () => false
+  );
+  if (!tablesReady) return { ...base, skippedReason: "The WhatsApp message log isn't in the database yet - redeploy on Vercel so the database update runs." };
   if (!config.enabled) return { ...base, skippedReason: "This group is switched off." };
   if (!config.templateId) return { ...base, skippedReason: "No template chosen for this group." };
   if (settings.testMode && !/^\d{10}$/.test(settings.testNumber)) return { ...base, skippedReason: "Test mode is on but no valid 10-digit test number is saved." };
