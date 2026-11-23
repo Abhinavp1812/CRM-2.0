@@ -1,5 +1,10 @@
+-- WhatsApp nudges (Anantya.ai): message log + opt-outs.
+-- Written to be idempotent (IF NOT EXISTS / guarded constraints) because the
+-- same statements can also be applied from Admin > WhatsApp ("Create WhatsApp
+-- tables now", src/lib/whatsappSchema.ts). Only adds; never alters existing data.
+
 -- CreateTable
-CREATE TABLE "WhatsAppMessage" (
+CREATE TABLE IF NOT EXISTS "WhatsAppMessage" (
     "id" TEXT NOT NULL,
     "customerId" TEXT,
     "phone" TEXT NOT NULL,
@@ -18,7 +23,7 @@ CREATE TABLE "WhatsAppMessage" (
 );
 
 -- CreateTable
-CREATE TABLE "WhatsAppOptOut" (
+CREATE TABLE IF NOT EXISTS "WhatsAppOptOut" (
     "customerId" TEXT NOT NULL,
     "reason" TEXT,
     "createdById" TEXT,
@@ -28,14 +33,21 @@ CREATE TABLE "WhatsAppOptOut" (
 );
 
 -- CreateIndex
-CREATE INDEX "WhatsAppMessage_customerId_createdAt_idx" ON "WhatsAppMessage"("customerId", "createdAt");
+CREATE INDEX IF NOT EXISTS "WhatsAppMessage_customerId_createdAt_idx" ON "WhatsAppMessage"("customerId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "WhatsAppMessage_createdAt_idx" ON "WhatsAppMessage"("createdAt");
+CREATE INDEX IF NOT EXISTS "WhatsAppMessage_createdAt_idx" ON "WhatsAppMessage"("createdAt");
 
 -- AddForeignKey
-ALTER TABLE "WhatsAppMessage" ADD CONSTRAINT "WhatsAppMessage_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'WhatsAppMessage_customerId_fkey') THEN
+    ALTER TABLE "WhatsAppMessage" ADD CONSTRAINT "WhatsAppMessage_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "WhatsAppOptOut" ADD CONSTRAINT "WhatsAppOptOut_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'WhatsAppOptOut_customerId_fkey') THEN
+    ALTER TABLE "WhatsAppOptOut" ADD CONSTRAINT "WhatsAppOptOut_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

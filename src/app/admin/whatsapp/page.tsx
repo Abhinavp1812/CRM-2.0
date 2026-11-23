@@ -4,6 +4,7 @@ import Link from "next/link";
 import Layout from "@/components/Layout";
 import WhatsAppNudgesPanel, { type PanelGroup } from "@/components/WhatsAppNudgesPanel";
 import SegmentBadge from "@/components/SegmentBadge";
+import WhatsAppSetupDbButton from "@/components/WhatsAppSetupDbButton";
 import { prisma } from "@/lib/prisma";
 import { isAnantyaConfigured, getTemplates, type AnantyaTemplate } from "@/lib/anantya";
 import {
@@ -110,10 +111,12 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
 
       {dbError && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 mb-5">
-          <b>The WhatsApp message log isn&apos;t in the database yet.</b> It&apos;s created automatically when Vercel deploys the latest code - check that the
-          newest deployment finished as &ldquo;Ready&rdquo; (if it shows &ldquo;Error&rdquo;, the build log says why). Until then you can set things up, but sending is
-          blocked.
-          <div className="text-xs text-red-600 mt-1 break-all">{String(dbError).slice(0, 300)}</div>
+          <b>The WhatsApp tables aren&apos;t in the database yet.</b> Until they are, you can set things up but sending is blocked (nothing may go out
+          without being logged).
+          <div>
+            <WhatsAppSetupDbButton />
+          </div>
+          <div className="text-xs text-red-600 mt-2 break-all">{String(dbError).slice(0, 300)}</div>
         </div>
       )}
 
