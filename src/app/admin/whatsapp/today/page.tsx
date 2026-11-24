@@ -34,7 +34,7 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
   const sp = await searchParams;
 
   const settings = await getNudgeSettings();
-  const [{ groups }, history] = await Promise.all([
+  const [{ groups, blocked, salonExcluded }, history] = await Promise.all([
     buildAudience(settings),
     loadBatchHistory(30).then(
       (h) => ({ ok: true as const, h }),
@@ -95,6 +95,24 @@ export default async function NudgesForTodayPage({ searchParams }: { searchParam
         </div>
       ) : (
         <>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 mb-4 text-sm">
+            <div>
+              <span className="font-semibold text-rose-800">Excluded salons (from Settings): </span>
+              {settings.excludeSalons.length ? (
+                <span className="text-rose-900">{settings.excludeSalons.join(", ")}</span>
+              ) : (
+                <span className="text-slate-600">none</span>
+              )}
+              {settings.excludeSalons.length > 0 && (
+                <span className="text-rose-700"> - {salonExcluded.toLocaleString("en-IN")} customers who ever ordered there are never picked</span>
+              )}
+            </div>
+            <div className="text-rose-700">
+              Do not nudge (Not Interested, DNC, Invalid, opted out): <b>{blocked.toLocaleString("en-IN")}</b> never picked
+            </div>
+            <Link href="/admin/whatsapp" className="text-blue-600 hover:underline text-xs">Change in Settings →</Link>
+          </div>
+
           <WhatsAppBatchControls
             latestAt={latest ? latest.at.toISOString() : null}
             latestIsToday={latestIsToday}

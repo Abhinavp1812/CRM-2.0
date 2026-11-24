@@ -193,7 +193,7 @@ export interface AudienceRow {
  */
 export async function buildAudience(
   settings: NudgeSettings
-): Promise<{ groups: Record<GroupKey, AudienceRow[]>; blocked: number; salonOptions: string[] }> {
+): Promise<{ groups: Record<GroupKey, AudienceRow[]>; blocked: number; salonExcluded: number; salonOptions: string[] }> {
   const since = Date.now() - settings.cooldownDays * 86_400_000;
   // The WhatsApp tables are read defensively so the lists, counts and salon
   // picker still work before the database update has created them.
@@ -210,7 +210,7 @@ export async function buildAudience(
   ]);
   const lastNudged = new Map(nudges.filter((n) => n.customerId && n._max.createdAt).map((n) => [n.customerId!, n._max.createdAt!]));
   const today = todayIsoIST();
-  const { lists } = buildNudgeLists(leads, {
+  const { lists, salonExcluded } = buildNudgeLists(leads, {
     optedOut: new Set(optOuts.map((o) => o.customerId)),
     excludeSalons: settings.excludeSalons,
     reengageFrom: today,
@@ -240,7 +240,7 @@ export async function buildAudience(
   for (const l of leads) for (const s of l.salonsEver) salonCounts.set(s, (salonCounts.get(s) ?? 0) + 1);
   const salonOptions = Array.from(salonCounts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
 
-  return { groups, blocked: lists.blocked.length, salonOptions };
+  return { groups, blocked: lists.blocked.length, salonExcluded, salonOptions };
 }
 
 /** Never nudged first, then the longest-ago nudged; phone as a stable tie-break. */

@@ -230,7 +230,8 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
       <div className="mt-8">
         <h2 className="text-lg font-semibold text-gray-900 mb-1">Recent messages</h2>
         <p className="text-xs text-slate-500 mb-3">
-          &ldquo;Sent&rdquo; means Anantya accepted the message. Delivery and read status are shown in Anantya&apos;s own dashboard.
+          Only messages the CRM itself sent through Anantya (customers picked in &ldquo;Nudges for today&rdquo; are not shown here - nothing is sent for
+          them). &ldquo;Sent&rdquo; means Anantya accepted the message. Delivery and read status are shown in Anantya&apos;s own dashboard.
         </p>
         <div className="bg-white rounded-lg shadow overflow-x-auto">
           <table className="w-full text-sm">
@@ -282,7 +283,10 @@ export default async function WhatsAppPage({ searchParams }: { searchParams: Pro
 }
 
 function loadRecent() {
+  // Only messages the CRM really sent (or tried to). "Nudges for today" lists are
+  // not messages - they're on their own tab and in the Nudge log.
   return prisma.whatsAppMessage.findMany({
+    where: { status: { not: "LISTED" } },
     orderBy: { createdAt: "desc" },
     take: 50,
     include: { customer: { select: { id: true, name: true } } },
