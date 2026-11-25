@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import Layout from "@/components/Layout";
 import { startOfTodayIST } from "@/lib/formatDate";
 import { isOnLeaveNow } from "@/lib/leave";
+import { callsByAgent, last7Days } from "@/lib/callCounts";
 
 export const dynamic = "force-dynamic";
 
@@ -30,20 +31,23 @@ export default async function AdminStatsPage() {
     prisma.followup.count({ where: { leadTemperature: "COLD", customer: { deletedAt: null, doNotContact: false } } }),
   ]);
 
+  // Calls (7d): same count as Insights 2.0 > "Calls by agent" for the last 7 days
+  // (today + 6 days before) - every Log-call click and every remark saved.
+  const week = last7Days();
+  const weekCalls = new Map((await callsByAgent({ start: week.start, end: week.end })).map((r) => [r.userId, r.calls]));
+
   const agentStats = await Promise.all(
     agents.map(async (a) => {
       const today = startOfTodayIST();
       const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-      const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
 
       const [ownedCount, ownedActive, ownedDnc, callsThisWeek, dueToday, customersContacted, customersBooked] = await Promise.all([
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: false, followup: { isNot: null } } }),
         prisma.customer.count({ where: { ownerId: a.id, deletedAt: null, doNotContact: true } }),
         // A call is a call whether it's logged with the dedicated button or simply
-        // recorded by saving a remark - saving a remark always stamps lastContactedAt
-        // too, so it represents a real contact just as much. One column, not two.
-        prisma.activityLog.count({ where: { userId: a.id, activityType: { in: ["CALL_LOGGED", "REMARK_ADDED"] }, createdAt: { gte: weekAgo } } }),
+        // recorded by saving a remark - one column, not two (lib/callCounts.ts).
+        Promise.resolve(weekCalls.get(a.id) ?? 0),
         prisma.followup.count({
           where: {
             customer: { ownerId: a.id, deletedAt: null, doNotContact: false },
@@ -108,7 +112,11 @@ export default async function AdminStatsPage() {
       {/* Per-agent section */}
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Per-Agent</h2>
-        <p className="text-xs text-slate-400">Contacted &amp; Booked are lifetime totals, not just the last 7 days</p>
+        <p className="text-xs text-slate-400">
+          Calls (7d) = every call logged + remark saved, {week.from.split("-").reverse().join("/")} - today (same as{" "}
+          <Link href={`/admin/insights2?cfrom=${week.from}&cto=${week.to}#calls`} className="text-blue-600 hover:underline">Insights 2.0</Link>). Contacted &amp; Booked
+          are lifetime totals.
+        </p>
       </div>
 
       {/* Mobile: cards */}

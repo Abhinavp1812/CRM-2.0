@@ -7,7 +7,8 @@ import { loadInsights, parseFilters, applyFilters, NO_CAMPAIGN, NO_OWNER, type I
 import { TREE, treeStats, findNode, flattenTree, conversionByCategory, nodeList, type TreeNode, type NodeStats } from "@/lib/journeyTree";
 import { SEGMENTS, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
 import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
-import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
+import { formatDateIN, todayIsoIST, istDayRange } from "@/lib/formatDate";
+import { callsByAgent } from "@/lib/callCounts";
 import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
 import { responseLabel, type CalledCustomer } from "@/lib/callActivity";
 import { PAY_TREE, payTreeStats, payStatusComparison, recoveryStats, paySelect, payKeyTitle } from "@/lib/paymentTree";
@@ -52,7 +53,15 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
   // "Calls in a date range" tree - its own dates (cfrom / cto), same campaign & agent filters.
   const { fromStr: pFrom, toStr: pTo } = periodRange(raw);
   const pRangeText = pFrom === pTo ? formatDateIN(pFrom) : `${formatDateIN(pFrom)} - ${formatDateIN(pTo)}`;
-  const periodCustomers = await loadPeriodCustomers(pFrom, pTo, filters);
+  const [periodCustomers, agentCalls] = await Promise.all([
+    loadPeriodCustomers(pFrom, pTo, filters),
+    // Calls counted like Team Stats: every Log-call click + remark saved, by who made it.
+    callsByAgent({ start: istDayRange(pFrom).start, end: istDayRange(pTo).end, campaigns: filters.campaign }),
+  ]);
+  const callTotals = agentCalls.reduce(
+    (t, a) => ({ calls: t.calls + a.calls, logged: t.logged + a.logged, remarks: t.remarks + a.remarks }),
+    { calls: 0, logged: 0, remarks: 0 }
+  );
   const pt = periodTree(periodCustomers, pRangeText);
   const pNodeKey = oneParam(raw.pnode);
   const pNode = pNodeKey && pt.stats.has(pNodeKey) ? pNodeKey : null;
@@ -502,6 +511,59 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
             );
           })}
         </div>
+        {/* Calls by agent - same count as Team Stats "Calls (7d)" */}
+        <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 mb-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Calls by agent, {pRangeText}: <span className="text-blue-700">{num(callTotals.calls)} calls</span>
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Every Log-call click and every remark saved = 1 call, for the agent who made it. Calling a customer twice counts twice. Same count as Team Stats
+              &ldquo;Calls (7d)&rdquo; for the last 7 days{filters.campaign.length ? " (here limited to the campaigns picked above)" : ""}.
+            </p>
+          </div>
+          {agentCalls.length === 0 ? (
+            <p className="text-xs text-slate-400">No calls in this date range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-blue-100">
+                    <th className="py-2 pr-3">Agent (who called)</th>
+                    <th className="py-2 px-3 text-right">Calls</th>
+                    <th className="py-2 px-3 text-right">Log call clicks</th>
+                    <th className="py-2 px-3 text-right">Remarks saved</th>
+                    <th className="py-2 pl-3 text-right">Different customers</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-blue-100">
+                  {agentCalls.map((a) => (
+                    <tr key={a.userId ?? "admin"}>
+                      <td className="py-1.5 pr-3 font-medium text-gray-900">{a.name}</td>
+                      <td className="py-1.5 px-3 text-right font-bold text-blue-700">{num(a.calls)}</td>
+                      <td className="py-1.5 px-3 text-right text-gray-600">{num(a.logged)}</td>
+                      <td className="py-1.5 px-3 text-right text-gray-600">{num(a.remarks)}</td>
+                      <td className="py-1.5 pl-3 text-right text-gray-600">{num(a.customers)}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold">
+                    <td className="py-1.5 pr-3 text-gray-900">Total</td>
+                    <td className="py-1.5 px-3 text-right text-blue-700">{num(callTotals.calls)}</td>
+                    <td className="py-1.5 px-3 text-right text-gray-700">{num(callTotals.logged)}</td>
+                    <td className="py-1.5 px-3 text-right text-gray-700">{num(callTotals.remarks)}</td>
+                    <td className="py-1.5 pl-3 text-right text-slate-400 text-xs font-normal">see tree below</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {periodCustomers.length > 0 && (
+          <p className="text-xs text-slate-500 mb-2">
+            Below: the <b>customers</b> behind those calls - each customer counted once, with what they said and whether they booked.
+          </p>
+        )}
         {periodCustomers.length === 0 ? (
           <p className="text-sm text-slate-400 py-6 text-center">Nobody was called in this date range.</p>
         ) : (

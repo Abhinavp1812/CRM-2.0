@@ -58,7 +58,7 @@ export function periodTree(customers: CalledCustomer[], rangeText: string): { tr
   );
   const tree: TreeNode = {
     key: "all",
-    title: "Called " + rangeText,
+    title: "Customers called " + rangeText,
     help: "Customers the team called or left a remark on in this date range (each counted once).",
     tone: "root",
     leaves: [],
