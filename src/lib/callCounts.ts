@@ -5,11 +5,11 @@ import { NO_CAMPAIGN } from "@/lib/insights";
 /**
  * "Calls" as Team Stats counts them, shared so Team Stats and Insights 2.0
  * always show the same number for the same agent and dates:
- * every "Log call" click AND every remark saved is one call, counted for the
- * agent who did it (whoever owns the customer). Calling one customer twice
- * counts twice.
+ * every remark saved is one call, counted for the agent who saved it (whoever
+ * owns the customer). Calling one customer twice counts twice. "Log call"
+ * button clicks are not counted (agents record every call with a remark).
  */
-export const CALL_ACTIVITY_TYPES = ["CALL_LOGGED", "REMARK_ADDED"] as const;
+export const CALL_ACTIVITY_TYPES = ["REMARK_ADDED"] as const;
 
 const DAY = 86_400_000;
 
@@ -23,10 +23,8 @@ export function last7Days(): { from: string; to: string; start: Date; end: Date 
 export interface AgentCalls {
   userId: string | null;
   name: string;
-  /** Log-call clicks + remarks saved. */
+  /** Remarks saved. */
   calls: number;
-  logged: number;
-  remarks: number;
   /** Different customers among those calls. */
   customers: number;
 }
@@ -38,19 +36,20 @@ export async function callsByAgent(q: { start: Date; end: Date; campaigns?: stri
   const where = {
     activityType: { in: [...CALL_ACTIVITY_TYPES] },
     createdAt: { gte: q.start, lt: q.end },
-    ...(campaigns.length
-      ? {
-          customer: {
+    customer: {
+      deletedAt: null,
+      ...(campaigns.length
+        ? {
             OR: [
               ...(real.length ? [{ leadSource: { in: real } }] : []),
               ...(campaigns.includes(NO_CAMPAIGN) ? [{ leadSource: null }, { leadSource: "" }] : []),
             ],
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
   };
   const [byType, byCustomer] = await Promise.all([
-    prisma.activityLog.groupBy({ by: ["userId", "activityType"], where, _count: { _all: true } }),
+    prisma.activityLog.groupBy({ by: ["userId"], where, _count: { _all: true } }),
     prisma.activityLog.groupBy({ by: ["userId", "customerId"], where }),
   ]);
   const ids = Array.from(new Set(byType.map((r) => r.userId).filter((x): x is string => !!x)));
@@ -60,15 +59,10 @@ export async function callsByAgent(q: { start: Date; end: Date; campaigns?: stri
   const rows = new Map<string, AgentCalls>();
   const row = (userId: string | null) => {
     const k = userId ?? "";
-    if (!rows.has(k)) rows.set(k, { userId, name: userId ? nameOf.get(userId) ?? "(deleted user)" : "Admin", calls: 0, logged: 0, remarks: 0, customers: 0 });
+    if (!rows.has(k)) rows.set(k, { userId, name: userId ? nameOf.get(userId) ?? "(deleted user)" : "Admin", calls: 0, customers: 0 });
     return rows.get(k)!;
   };
-  for (const r of byType) {
-    const a = row(r.userId);
-    a.calls += r._count._all;
-    if (r.activityType === "CALL_LOGGED") a.logged += r._count._all;
-    else a.remarks += r._count._all;
-  }
+  for (const r of byType) row(r.userId).calls += r._count._all;
   for (const r of byCustomer) row(r.userId).customers++;
   return Array.from(rows.values()).sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
 }

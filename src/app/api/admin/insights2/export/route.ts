@@ -5,9 +5,8 @@ import { TREE, treeStats, flattenTree, findNode, conversionByCategory, nodeList,
 import { PAY_TREE, payTreeStats, payStatusComparison, recoveryStats, paySelect, payKeyTitle } from "@/lib/paymentTree";
 import { SEGMENTS, segmentInfo, isSegmentKey } from "@/lib/segments";
 import { oneParam, searchParamsToRecord } from "@/lib/params";
-import { formatDateIN, todayIsoIST } from "@/lib/formatDate";
-import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
-import { responseLabel } from "@/lib/callActivity";
+import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
+import { periodRange, loadPeriodCalls, periodTree, periodSelect } from "@/lib/periodTree";
 
 export const maxDuration = 60;
 
@@ -58,7 +57,7 @@ export async function GET(req: Request) {
   if (pnode) {
     const { fromStr, toStr } = periodRange(raw);
     const pFilters = { ...parseFilters(raw), salon: [] };
-    const called = await loadPeriodCustomers(fromStr, toStr, pFilters);
+    const called = await loadPeriodCalls(fromStr, toStr, pFilters);
     const pt = periodTree(called, `${formatDateIN(fromStr)} - ${formatDateIN(toStr)}`);
     if (!pt.stats.has(pnode)) return new Response(JSON.stringify({ error: "Unknown box" }), { status: 400 });
     const psegParam = oneParam(raw.pseg);
@@ -72,7 +71,7 @@ export async function GET(req: Request) {
           const s = pt.stats.get(n.key)!;
           return {
             Box: "    ".repeat(depth) + n.title,
-            Customers: s.total,
+            Calls: s.total,
             "% of box above": parent ? pct(s.total, pt.stats.get(parent.key)!.total) : 100,
             ...Object.fromEntries(SEGMENTS.map((x) => [x.label, s.bySegment[x.key]])),
           };
@@ -83,19 +82,19 @@ export async function GET(req: Request) {
       wb,
       pt.titleOf(pnode) + (pseg ? " - " + segmentInfo(pseg).label : ""),
       periodSelect(called, pnode, pseg).map((c) => ({
-        Customer: c.name ?? "",
+        Date: formatDateIN(c.at),
+        Time: formatTimeIN(c.at, { hour: "2-digit", minute: "2-digit" }),
+        "Called by": c.calledBy,
+        Customer: c.customerName ?? "",
         Phone: c.phone,
         City: c.city ?? "",
-        "Category (when first called in range)": segmentInfo(c.segment).label,
+        "Category (on the day of the call)": segmentInfo(c.segment).label,
+        Remark: c.remark ?? "",
+        Temperature: c.leadTemperature ?? "",
+        Note: c.note?.trim() ?? "",
+        "Booked after the call": c.bookedOn ? formatDateIN(c.bookedOn) : "",
         Owner: c.ownerName ?? "",
         Campaign: c.campaign ?? "",
-        "First call": formatDateIN(c.firstAt),
-        "Calls & remarks": c.activities,
-        Response: responseLabel(c.response),
-        "Booked on": c.bookedOn ? formatDateIN(c.bookedOn) : "",
-        "Latest remark": c.remark ?? "",
-        "Remark by": c.remarkBy ?? "",
-        "Latest note": c.note ?? "",
       }))
     );
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;

@@ -7,10 +7,8 @@ import { loadInsights, parseFilters, applyFilters, NO_CAMPAIGN, NO_OWNER, type I
 import { TREE, treeStats, findNode, flattenTree, conversionByCategory, nodeList, type TreeNode, type NodeStats } from "@/lib/journeyTree";
 import { SEGMENTS, segmentInfo, isSegmentKey, type SegmentKey } from "@/lib/segments";
 import { buildQuery, oneParam, type SearchParamsRecord } from "@/lib/params";
-import { formatDateIN, todayIsoIST, istDayRange } from "@/lib/formatDate";
-import { callsByAgent } from "@/lib/callCounts";
-import { periodRange, loadPeriodCustomers, periodTree, periodSelect } from "@/lib/periodTree";
-import { responseLabel, type CalledCustomer } from "@/lib/callActivity";
+import { formatDateIN, formatTimeIN, todayIsoIST } from "@/lib/formatDate";
+import { periodRange, loadPeriodCalls, periodTree, periodSelect, agentSummary, type CallEntry } from "@/lib/periodTree";
 import { PAY_TREE, payTreeStats, payStatusComparison, recoveryStats, paySelect, payKeyTitle } from "@/lib/paymentTree";
 import { PAY_STATUSES } from "@/lib/insights";
 import styles from "./tree.module.css";
@@ -53,22 +51,21 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
   // "Calls in a date range" tree - its own dates (cfrom / cto), same campaign & agent filters.
   const { fromStr: pFrom, toStr: pTo } = periodRange(raw);
   const pRangeText = pFrom === pTo ? formatDateIN(pFrom) : `${formatDateIN(pFrom)} - ${formatDateIN(pTo)}`;
-  const [periodCustomers, agentCalls] = await Promise.all([
-    loadPeriodCustomers(pFrom, pTo, filters),
-    // Calls counted like Team Stats: every Log-call click + remark saved, by who made it.
-    callsByAgent({ start: istDayRange(pFrom).start, end: istDayRange(pTo).end, campaigns: filters.campaign }),
-  ]);
-  const callTotals = agentCalls.reduce(
-    (t, a) => ({ calls: t.calls + a.calls, logged: t.logged + a.logged, remarks: t.remarks + a.remarks }),
-    { calls: 0, logged: 0, remarks: 0 }
-  );
-  const pt = periodTree(periodCustomers, pRangeText);
+  // Every call counts (calling a customer twice = 2), same as Team Stats "Calls (7d)".
+  const periodCalls = await loadPeriodCalls(pFrom, pTo, filters);
+  const agentCalls = agentSummary(periodCalls);
+  const callTotals = {
+    calls: periodCalls.length,
+    customers: new Set(periodCalls.map((c) => c.customerId)).size,
+    booked: periodCalls.filter((c) => c.response === "booked").length,
+  };
+  const pt = periodTree(periodCalls, pRangeText);
   const pNodeKey = oneParam(raw.pnode);
   const pNode = pNodeKey && pt.stats.has(pNodeKey) ? pNodeKey : null;
   const psegParam = oneParam(raw.pseg);
   const pseg: SegmentKey | null = isSegmentKey(psegParam) ? psegParam : null;
   const ppage = Math.max(1, parseInt(oneParam(raw.ppage) || "1", 10) || 1);
-  const pRows = pNode ? periodSelect(periodCustomers, pNode, pseg) : [];
+  const pRows = pNode ? periodSelect(periodCalls, pNode, pseg) : [];
   const pTotalPages = Math.max(1, Math.ceil(pRows.length / PAGE_SIZE));
   const pPageRows = pRows.slice((ppage - 1) * PAGE_SIZE, ppage * PAGE_SIZE);
 
@@ -469,8 +466,9 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
           <div>
             <h2 className="font-semibold text-gray-900">Calls in a date range - who we called and what they said</h2>
             <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-              Pick any dates. Each customer called in that range counts once, coloured by their category on the day of their first call in the range. Uses the
-              campaign and agent filters above (not the joined dates).
+              Pick any dates. <b>Every call counts</b> - each remark saved is one call, so calling a customer twice counts twice (same as Team Stats). Split
+              by the agent who made the call, then by what the customer said. Colours = the customer&apos;s category on the day of that call. Uses the campaign
+              filter above (not the joined dates or the owner filter).
             </p>
           </div>
           <a href={exportHref({ pnode: "all" })} download className="px-2.5 h-7 inline-flex items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs font-medium">
@@ -511,15 +509,15 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
             );
           })}
         </div>
-        {/* Calls by agent - same count as Team Stats "Calls (7d)" */}
+        {/* Calls by agent - same numbers as Team Stats "Calls (7d)" and as the agent boxes in the tree */}
         <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 mb-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
             <h3 className="text-sm font-semibold text-gray-900">
               Calls by agent, {pRangeText}: <span className="text-blue-700">{num(callTotals.calls)} calls</span>
             </h3>
             <p className="text-[11px] text-slate-500">
-              Every Log-call click and every remark saved = 1 call, for the agent who made it. Calling a customer twice counts twice. Same count as Team Stats
-              &ldquo;Calls (7d)&rdquo; for the last 7 days{filters.campaign.length ? " (here limited to the campaigns picked above)" : ""}.
+              Each remark saved = 1 call, for the agent who saved it. Same count as Team Stats &ldquo;Calls (7d)&rdquo; for the last 7 days
+              {filters.campaign.length ? " (here limited to the campaigns picked above)" : ""}. Click an agent to see their calls.
             </p>
           </div>
           {agentCalls.length === 0 ? (
@@ -531,27 +529,26 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
                   <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-blue-100">
                     <th className="py-2 pr-3">Agent (who called)</th>
                     <th className="py-2 px-3 text-right">Calls</th>
-                    <th className="py-2 px-3 text-right">Log call clicks</th>
-                    <th className="py-2 px-3 text-right">Remarks saved</th>
-                    <th className="py-2 pl-3 text-right">Different customers</th>
+                    <th className="py-2 px-3 text-right">Different customers</th>
+                    <th className="py-2 pl-3 text-right">Calls followed by a booking</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-blue-100">
                   {agentCalls.map((a) => (
-                    <tr key={a.userId ?? "admin"}>
-                      <td className="py-1.5 pr-3 font-medium text-gray-900">{a.name}</td>
+                    <tr key={a.key}>
+                      <td className="py-1.5 pr-3 font-medium">
+                        <Link href={periodHref(a.key)} className="text-blue-700 hover:underline">{a.name}</Link>
+                      </td>
                       <td className="py-1.5 px-3 text-right font-bold text-blue-700">{num(a.calls)}</td>
-                      <td className="py-1.5 px-3 text-right text-gray-600">{num(a.logged)}</td>
-                      <td className="py-1.5 px-3 text-right text-gray-600">{num(a.remarks)}</td>
-                      <td className="py-1.5 pl-3 text-right text-gray-600">{num(a.customers)}</td>
+                      <td className="py-1.5 px-3 text-right text-gray-600">{num(a.customers)}</td>
+                      <td className="py-1.5 pl-3 text-right text-emerald-700">{num(a.booked)}</td>
                     </tr>
                   ))}
                   <tr className="font-semibold">
                     <td className="py-1.5 pr-3 text-gray-900">Total</td>
                     <td className="py-1.5 px-3 text-right text-blue-700">{num(callTotals.calls)}</td>
-                    <td className="py-1.5 px-3 text-right text-gray-700">{num(callTotals.logged)}</td>
-                    <td className="py-1.5 px-3 text-right text-gray-700">{num(callTotals.remarks)}</td>
-                    <td className="py-1.5 pl-3 text-right text-slate-400 text-xs font-normal">see tree below</td>
+                    <td className="py-1.5 px-3 text-right text-gray-700">{num(callTotals.customers)}</td>
+                    <td className="py-1.5 pl-3 text-right text-emerald-700">{num(callTotals.booked)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -559,28 +556,23 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
           )}
         </div>
 
-        {periodCustomers.length > 0 && (
-          <p className="text-xs text-slate-500 mb-2">
-            Below: the <b>customers</b> behind those calls - each customer counted once, with what they said and whether they booked.
-          </p>
-        )}
-        {periodCustomers.length === 0 ? (
-          <p className="text-sm text-slate-400 py-6 text-center">Nobody was called in this date range.</p>
+        {periodCalls.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">No calls in this date range.</p>
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               {SEGMENTS.map((s) => {
                 const n = pt.stats.get("all")!.bySegment[s.key];
-                const b = pt.stats.get("booked")!.bySegment[s.key];
+                const b = periodCalls.filter((c) => c.segment === s.key && c.response === "booked").length;
                 return (
                   <Link key={s.key} href={periodHref("all", s.key)} className={"rounded-xl border p-3 hover:shadow-sm transition " + s.card}>
                     <p className="text-xs font-semibold flex items-center gap-1.5">
                       <span className={"w-2.5 h-2.5 rounded-full " + s.dot} />
-                      {s.label} called
+                      Calls to {s.label}
                     </p>
                     <p className="text-2xl font-bold text-gray-900 mt-0.5">{num(n)}</p>
                     <p className="text-[11px] opacity-80">
-                      {num(b)} booked after the call ({pct(b, n)}%)
+                      {num(b)} followed by a booking ({pct(b, n)}%)
                     </p>
                   </Link>
                 );
@@ -615,7 +607,7 @@ export default async function Insights2Page({ searchParams }: { searchParams: Pr
                 <SegChip key={s.key} href={periodHref(pNode, s.key)} active={pseg === s.key} label={s.label} count={pt.stats.get(pNode)!.bySegment[s.key]} dot={s.dot} />
               ))}
             </div>
-            <CalledTable rows={pPageRows} />
+            <CallsTable rows={pPageRows} />
             {pTotalPages > 1 && (
               <div className="flex items-center justify-between mt-4 px-1">
                 <p className="text-sm text-gray-600">Page {ppage} of {pTotalPages}</p>
@@ -945,60 +937,45 @@ function CustomerTable({ rows }: { rows: LeadFacts[] }) {
   );
 }
 
-function CalledTable({ rows }: { rows: CalledCustomer[] }) {
-  if (rows.length === 0) return <div className="bg-slate-50 rounded-lg p-8 text-center text-gray-600">No customers here.</div>;
+function CallsTable({ rows }: { rows: CallEntry[] }) {
+  if (rows.length === 0) return <div className="bg-slate-50 rounded-lg p-8 text-center text-gray-600">No calls here.</div>;
   return (
     <div className="rounded-lg border border-gray-200 overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 border-b">
           <tr className="text-left text-xs font-medium text-gray-700 uppercase">
+            <th className="px-3 py-3">When</th>
+            <th className="px-3 py-3">Called by</th>
             <th className="px-3 py-3">Customer</th>
             <th className="px-3 py-3">Phone</th>
-            <th className="px-3 py-3" title="Category on the day of their first call in this range">Category</th>
+            <th className="px-3 py-3" title="Category on the day of this call">Category</th>
+            <th className="px-3 py-3">Remark</th>
+            <th className="px-3 py-3">Note</th>
+            <th className="px-3 py-3">Booked after</th>
             <th className="px-3 py-3">Owner</th>
-            <th className="px-3 py-3">Campaign</th>
-            <th className="px-3 py-3">First call</th>
-            <th className="px-3 py-3 text-right" title="Calls and remarks in this range">Calls</th>
-            <th className="px-3 py-3">Response</th>
-            <th className="px-3 py-3">Booked on</th>
-            <th className="px-3 py-3">Latest remark</th>
-            <th className="px-3 py-3">Latest note</th>
             <th className="px-3 py-3"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
           {rows.map((r) => (
             <tr key={r.id} className="hover:bg-gray-50 align-top">
+              <td className="px-3 py-3 text-gray-700 whitespace-nowrap">
+                {formatDateIN(r.at)}
+                <div className="text-xs text-slate-400">{formatTimeIN(r.at, { hour: "2-digit", minute: "2-digit" })}</div>
+              </td>
+              <td className="px-3 py-3 text-gray-800">{r.calledBy}</td>
               <td className="px-3 py-3 font-medium text-gray-900">
-                {r.name ?? "(no name)"}
+                {r.customerName ?? "(no name)"}
                 {r.city && <div className="text-xs text-slate-400 font-normal">{r.city}</div>}
               </td>
               <td className="px-3 py-3 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
               <td className="px-3 py-3"><SegBadge k={r.segment} /></td>
-              <td className="px-3 py-3 text-gray-600">{r.ownerName ?? "-"}</td>
-              <td className="px-3 py-3 text-gray-600 text-xs">{r.campaign ?? "-"}</td>
-              <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{formatDateIN(r.firstAt)}</td>
-              <td className="px-3 py-3 text-right text-gray-900">{r.activities}</td>
-              <td className="px-3 py-3 text-xs whitespace-nowrap">
-                <span className={r.response === "booked" ? "font-semibold text-emerald-700" : "text-gray-800"}>{responseLabel(r.response)}</span>
-              </td>
+              <td className="px-3 py-3 text-xs font-medium text-gray-800 min-w-[8rem]">{r.remark ?? <span className="text-slate-400 font-normal">-</span>}</td>
+              <td className="px-3 py-3 text-xs text-gray-700 min-w-[12rem] max-w-[18rem] whitespace-pre-line">{r.note?.trim() ? "“" + r.note.trim() + "”" : <span className="text-slate-400">-</span>}</td>
               <td className="px-3 py-3 whitespace-nowrap">{r.bookedOn ? <span className="text-emerald-700 font-medium">{formatDateIN(r.bookedOn)}</span> : "-"}</td>
-              <td className="px-3 py-3 text-xs min-w-[9rem]">
-                {r.remark ? (
-                  <>
-                    <span className="font-medium text-gray-800">{r.remark}</span>
-                    <div className="text-slate-400">
-                      {r.remarkAt ? formatDateIN(r.remarkAt) : ""}
-                      {r.remarkBy ? " · " + r.remarkBy : ""}
-                    </div>
-                  </>
-                ) : (
-                  <span className="text-slate-400">No remark</span>
-                )}
-              </td>
-              <td className="px-3 py-3 text-xs text-gray-700 min-w-[12rem] max-w-[18rem] whitespace-pre-line">{r.note ? "\u201c" + r.note + "\u201d" : <span className="text-slate-400">-</span>}</td>
+              <td className="px-3 py-3 text-gray-600">{r.ownerName ?? "-"}</td>
               <td className="px-3 py-3">
-                <Link href={"/customers/" + r.id} className="text-blue-600 hover:underline text-xs">Open</Link>
+                <Link href={"/customers/" + r.customerId} className="text-blue-600 hover:underline text-xs">Open</Link>
               </td>
             </tr>
           ))}

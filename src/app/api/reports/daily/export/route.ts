@@ -70,6 +70,31 @@ export async function GET(req: Request) {
       "Latest note": c.note || "",
     }))
   );
+  if (isAdmin) {
+    // Calls per agent - each remark saved = 1 call (same rule as Team Stats).
+    const byAgent = new Map<string, { name: string; calls: number; customers: Set<string>; bySeg: Record<string, number> }>();
+    for (const r of rows) {
+      if (r.kind !== "REMARK_ADDED") continue;
+      const k = r.calledById ?? "admin";
+      const a = byAgent.get(k) ?? { name: r.calledBy, calls: 0, customers: new Set<string>(), bySeg: {} };
+      a.calls++;
+      a.customers.add(r.customerId);
+      a.bySeg[r.segment] = (a.bySeg[r.segment] ?? 0) + 1;
+      byAgent.set(k, a);
+    }
+    addSheet(
+      wb,
+      "Calls by agent",
+      Array.from(byAgent.values())
+        .sort((a, b) => b.calls - a.calls)
+        .map((a) => ({
+          Agent: a.name,
+          Calls: a.calls,
+          "Different customers": a.customers.size,
+          ...Object.fromEntries(SEGMENTS.map((s) => [s.label, a.bySeg[s.key] ?? 0])),
+        }))
+    );
+  }
   const responses = Array.from(new Set(customers.map((c) => c.response)));
   addSheet(
     wb,

@@ -42,6 +42,21 @@ export default async function DailyReportPage({ searchParams }: { searchParams: 
   const customers = segSet ? customersAll.filter((c) => segSet.has(c.segment)) : customersAll;
   const booked = customers.filter((c) => c.response === "booked").length;
 
+  // Calls per agent (who called) - a call = a remark saved, the same rule as Team
+  // Stats and Insights 2.0 (lib/callCounts.ts). Follows every filter on the page.
+  const byAgent = new Map<string, { id: string | null; name: string; calls: number; customers: Set<string>; bySeg: Record<SegmentKey, number> }>();
+  for (const r of rows) {
+    if (r.kind !== "REMARK_ADDED") continue;
+    const k = r.calledById ?? "admin";
+    const a = byAgent.get(k) ?? { id: r.calledById, name: r.calledBy, calls: 0, customers: new Set<string>(), bySeg: Object.fromEntries(SEGMENTS.map((x) => [x.key, 0])) as Record<SegmentKey, number> };
+    a.calls++;
+    a.customers.add(r.customerId);
+    a.bySeg[r.segment]++;
+    byAgent.set(k, a);
+  }
+  const agentCalls = Array.from(byAgent.values()).sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
+  const agentTotal = agentCalls.reduce((n, a) => n + a.calls, 0);
+
   // Response x category matrix (one row per customer: their latest remark in range, or "booked").
   const responses = Array.from(new Set(customers.map((c) => c.response))).sort((a, b) =>
     a === "booked" ? -1 : b === "booked" ? 1 : a === "no_remark" ? 1 : b === "no_remark" ? -1 : countOf(customers, b) - countOf(customers, a)
@@ -182,6 +197,65 @@ export default async function DailyReportPage({ searchParams }: { searchParams: 
           <p className="text-[11px] text-emerald-700/70">{pct(booked, customers.length)}% of customers called{segSet ? " (selected categories)" : ""}</p>
         </div>
       </div>
+
+      {/* ---------- Calls by agent (admin) ---------- */}
+      {isAdmin && agentCalls.length > 0 && (
+        <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-4 mb-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-semibold text-gray-900 text-sm">
+              Calls by agent · {rangeText}: <span className="text-blue-700">{num(agentTotal)} calls</span>
+            </h2>
+            <p className="text-[11px] text-slate-500">Each remark saved = 1 call, for the agent who saved it; calling a customer twice counts twice. Same count as Team Stats. Click a name to see only their calls.</p>
+          </div>
+          <div className="overflow-x-auto mt-3">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b">
+                  <th className="px-2 py-2 text-left">Agent (who called)</th>
+                  <th className="px-2 py-2 text-right">Calls</th>
+                  <th className="px-2 py-2 text-right">Different customers</th>
+                  {SEGMENTS.map((s) => (
+                    <th key={s.key} className="px-2 py-2 text-right">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={"w-2 h-2 rounded-full " + s.dot} />
+                        {s.label}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {agentCalls.map((a) => (
+                  <tr key={a.id ?? "admin"} className="hover:bg-slate-50">
+                    <td className="px-2 py-2 font-medium">
+                      {a.id ? (
+                        <Link href={href({ by: [a.id], page: undefined })} className="text-blue-700 hover:underline">{a.name}</Link>
+                      ) : (
+                        a.name
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-right font-bold text-blue-700">{num(a.calls)}</td>
+                    <td className="px-2 py-2 text-right text-gray-700">{num(a.customers.size)}</td>
+                    {SEGMENTS.map((s) => (
+                      <td key={s.key} className="px-2 py-2 text-right text-gray-600">{a.bySeg[s.key] ? num(a.bySeg[s.key]) : <span className="text-slate-300">-</span>}</td>
+                    ))}
+                  </tr>
+                ))}
+                {agentCalls.length > 1 && (
+                  <tr className="font-semibold border-t">
+                    <td className="px-2 py-2 text-gray-900">Total</td>
+                    <td className="px-2 py-2 text-right text-blue-700">{num(agentTotal)}</td>
+                    <td className="px-2 py-2 text-right text-gray-700">{num(new Set(rows.filter((r) => r.kind === "REMARK_ADDED").map((r) => r.customerId)).size)}</td>
+                    {SEGMENTS.map((s) => (
+                      <td key={s.key} className="px-2 py-2 text-right text-gray-700">{num(agentCalls.reduce((n, a) => n + a.bySeg[s.key], 0))}</td>
+                    ))}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ---------- Responses by category ---------- */}
       {customers.length > 0 && (

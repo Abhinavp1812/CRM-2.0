@@ -113,7 +113,7 @@ export default async function AdminStatsPage() {
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Per-Agent</h2>
         <p className="text-xs text-slate-400">
-          Calls (7d) = every call logged + remark saved, {week.from.split("-").reverse().join("/")} - today (same as{" "}
+          Calls (7d) = every remark saved (calling a customer twice = 2), {week.from.split("-").reverse().join("/")} - today (same as{" "}
           <Link href={`/admin/insights2?cfrom=${week.from}&cto=${week.to}#calls`} className="text-blue-600 hover:underline">Insights 2.0</Link>). Contacted &amp; Booked
           are lifetime totals.
         </p>

@@ -50,6 +50,8 @@ export interface ActivityRow {
   ownerName: string | null;
   campaign: string | null;
   calledBy: string;
+  /** User id of who made the call (null = super admin). */
+  calledById: string | null;
   remark: string | null;
   leadTemperature: "HOT" | "WARM" | "COLD" | null;
   note: string | null;
@@ -121,6 +123,7 @@ export async function loadCallActivity(q: CallActivityQuery): Promise<ActivityRo
       leadTemperature: true,
       note: true,
       newValue: true,
+      userId: true,
       user: { select: { name: true } },
       customer: {
         select: { id: true, name: true, phone: true, city: true, leadSource: true, ownerId: true, owner: { select: { name: true } } },
@@ -146,6 +149,7 @@ export async function loadCallActivity(q: CallActivityQuery): Promise<ActivityRo
       ownerName: a.customer.owner?.name ?? null,
       campaign: a.customer.leadSource,
       calledBy: a.user?.name ?? "Admin",
+      calledById: a.userId,
       remark: a.remark,
       leadTemperature: a.leadTemperature,
       note: a.note,
